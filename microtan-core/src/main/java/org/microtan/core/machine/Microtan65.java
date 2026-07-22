@@ -125,6 +125,11 @@ private final VideoController video;
         return charset;
     }
 
+    public VideoController getVideoController() {
+        return video;
+    }
+
+
 }
 
 

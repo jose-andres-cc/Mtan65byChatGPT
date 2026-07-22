@@ -1,19 +1,46 @@
 package org.microtan.app;
 
+import javax.swing.SwingUtilities;
+
 import org.microtan.core.machine.Microtan65;
 import org.microtan.ui.MainWindow;
 
-public class Main {
+public final class Main {
 
-    public static void main(String[] args) throws Exception {
+    private Main() {
+    }
 
-        Microtan65 machine = new Microtan65();
+    public static void main(String[] args) {
 
-        MainWindow window = new MainWindow(machine);
+        SwingUtilities.invokeLater(() -> {
 
-        machine.start();
+            try {
 
-        window.show();
+                Microtan65 machine = new Microtan65();
+
+                MainWindow window = new MainWindow(machine.getVideoController());
+
+                window.setLocationRelativeTo(null);
+
+                window.setVisible(true);
+
+                MachineRunner runner =
+                        new MachineRunner(
+                                machine,
+                                window);
+
+                runner.start();
+
+            }
+            catch (Exception e) {
+
+                e.printStackTrace();
+
+                System.exit(1);
+
+            }
+
+        });
 
     }
 

@@ -11,22 +11,22 @@ import org.microtan.core.video.VideoController;
 
 public class VideoPanel extends JPanel {
 
-    private final VideoController video;
+    private final VideoController videoController;
 
     private final BufferedImage image;
 
     private final int scale;
 
-    public VideoPanel(VideoController video) {
-        this(video, 2);
+    public VideoPanel(VideoController videoController) {
+        this(videoController, 2);
     }
 
-    public VideoPanel(VideoController video, int scale) {
+    public VideoPanel(VideoController videoController, int scale) {
 
-        this.video = video;
+        this.videoController = videoController;
         this.scale = scale;
 
-        FrameBuffer fb = video.getFrameBuffer();
+        FrameBuffer fb = videoController.getFrameBuffer();
 
         image = new BufferedImage(
                 fb.getWidth(),
@@ -43,7 +43,7 @@ public class VideoPanel extends JPanel {
 
         super.paintComponent(g);
 
-        FrameBuffer fb = video.getFrameBuffer();
+        FrameBuffer fb = videoController.getFrameBuffer();
 
         image.setRGB(
                 0,
@@ -63,11 +63,10 @@ public class VideoPanel extends JPanel {
                 null);
     }
 
-    /**
-     * Solicita el refresco de la pantalla.
-     */
     public void refresh() {
+
         repaint();
+
     }
 
 }

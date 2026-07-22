@@ -19,7 +19,10 @@ public class Cpu6502 extends CPU6510{
 
     }
 
-    public void step() {
+    // Cambio de la gestion de cycles
+    public int stepWithCycles() {
+        super.step();
+        return (int) super.getCycles();
 
     }
 

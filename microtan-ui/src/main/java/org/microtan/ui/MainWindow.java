@@ -1,28 +1,42 @@
 package org.microtan.ui;
 
 import javax.swing.JFrame;
+import javax.swing.SwingUtilities;
 
-import org.microtan.core.machine.Microtan65;
+import org.microtan.ui.video.FrameListener;
+//import org.microtan.core.machine.Microtan65;
+import org.microtan.core.video.VideoController;
+import org.microtan.ui.video.VideoPanel;
 
-public class MainWindow {
+public class MainWindow extends JFrame implements FrameListener {
 
-    private final JFrame frame = new JFrame("Microtan 65");
+    private final VideoPanel videoPanel;
 
-    private final Microtan65 machine;
+    public MainWindow(VideoController videoController) {
 
-    public MainWindow(Microtan65 machine) {
+        super("Microtan 65");
 
-        this.machine = machine;
+        videoPanel =
+                new VideoPanel(videoController);
+
+        add(videoPanel);
+
+        pack();
+
+        setDefaultCloseOperation(EXIT_ON_CLOSE);
+    }
+
+    public VideoPanel getVideoPanel() {
+
+        return videoPanel;
 
     }
 
-    public void show() {
+    @Override
+    public void frameCompleted() {
 
-        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-
-        frame.pack();
-
-        frame.setVisible(true);
+        SwingUtilities.invokeLater(
+                videoPanel::refresh);
 
     }
 
