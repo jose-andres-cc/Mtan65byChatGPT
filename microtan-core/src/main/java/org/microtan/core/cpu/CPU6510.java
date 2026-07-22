@@ -413,7 +413,7 @@ private void ldy(int value) {
 
 
     public void step_execute_based() {
-        if (hooks.handle(this)) return;
+        //if (hooks.handle(this)) return;
 
         int opcode = read(PC++);
         execute(opcode);

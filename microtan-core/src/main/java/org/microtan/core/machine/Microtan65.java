@@ -88,6 +88,8 @@ private final VideoController video;
 
         while (running) {
 
+            int cycles = 5; // JAC temporal
+
             cpu.step();
             // mejora a futuro -> int cycles = cpu.step();
 
@@ -96,7 +98,7 @@ private final VideoController video;
     via.tick();
     //via.tick(cycles);
 
-    video.tick();
+    video.tick(cycles);
     // video.tick(cycles);
 
 

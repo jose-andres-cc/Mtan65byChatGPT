@@ -1,4 +1,4 @@
-package com.example.c64.cpu;
+package org.microtan.core.cpu;
 
 @FunctionalInterface
 public interface Instruction {

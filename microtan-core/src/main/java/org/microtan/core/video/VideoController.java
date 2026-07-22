@@ -4,16 +4,6 @@ import org.microtan.core.memory.RAM;
 import org.microtan.core.bus.Bus;
 import org.microtan.core.video.CharacterROM;
 
-public record VideoConfiguration(
-        int columns,
-        int rows,
-        int charWidth,
-        int charHeight,
-        int videoRamAddress,
-        int frameRate) {
-}
-
-
 public class VideoController {
 
     public static final int COLUMNS = 32;
@@ -31,6 +21,14 @@ public class VideoController {
      */
     public static final int VIDEO_RAM = 0x0200;
 
+    //FRAME_CYCLES = CPU_FREQUENCY / FRAME_RATE
+    //CPU = 750 kHz (750 000 Hz)
+    //Vídeo = 50 Hz (PAL)
+    // tambien
+    //frameCycles =
+    //    cpuFrequency / video.refreshRate();
+    private static final int FRAME_CYCLES = 15000;
+
     private static final int BLACK = 0x000000;
     private static final int WHITE = 0xFFFFFF;
 
@@ -40,11 +38,13 @@ public class VideoController {
 
     private final FrameBuffer frameBuffer;
 
+    private int accumulatedCycles = 0;
 
-public VideoController(
-        Bus bus,
-        CharacterROM rom,
-        VideoConfiguration config)
+    //Mejora: VideoController configurable
+// public VideoController(
+//         Bus bus,
+//         CharacterROM rom,
+//         VideoConfiguration config)
 
 
     public VideoController(Bus bus, CharacterROM characterRom) {
@@ -125,6 +125,7 @@ public void tick(int cycles) {
         render();
     }
 
+    // Mejora: dibujar linea a linea con drawScanLine();
 }
 
 
