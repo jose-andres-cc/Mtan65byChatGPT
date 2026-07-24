@@ -64,6 +64,17 @@ private final FrameListener listener;
     @Override
     public void run() {
 
+
+machine.getBus().write(0x0200,'H');
+machine.getBus().write(0x0201,'E');
+machine.getBus().write(0x0202,'L');
+machine.getBus().write(0x0203,'L');
+machine.getBus().write(0x0204,'O');
+
+
+
+
+
         while (running) {
 
             long frameStart = System.nanoTime();
@@ -110,7 +121,7 @@ private final FrameListener listener;
             executedCycles += cycles;
 
             // JAC para que compile
-            //machine.getVideoController().tick(cycles);
+            machine.getVideoController().tick(cycles);
             //listener.tick(cycles);
 
 
