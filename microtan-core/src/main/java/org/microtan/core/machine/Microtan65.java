@@ -5,7 +5,9 @@ import java.nio.file.Path;
 
 import org.microtan.core.bus.Bus;
 import org.microtan.core.cpu.Cpu6502;
+import org.microtan.core.io.MicrotanIo;
 import org.microtan.core.io.VIA6522;
+import org.microtan.core.io.keyboard.Keyboard;
 import org.microtan.core.memory.RAM;
 import org.microtan.core.memory.ROM;
 import org.microtan.core.memory.RomLoader;
@@ -25,6 +27,10 @@ public class Microtan65 {
     private final ROM tanbug;
 
     private final VIA6522 via;
+
+    private final MicrotanIo microtanIo;
+
+    private final Keyboard keyboard;
 
     private final CharacterROM charset;
 private final VideoController video;
@@ -48,6 +54,9 @@ private final VideoController video;
 
         via = new VIA6522();
 
+        keyboard = new Keyboard();
+
+        microtanIo = new MicrotanIo(keyboard);
         //
         // Mapa de memoria
         //
@@ -61,7 +70,19 @@ private final VideoController video;
         // VIA (provisional)
         // bus.map(via, ...);
 
+        // IO map
+        // BFC0-BFCF   VIA
+        // BFD0-BFD3   Serial
+        // BFE0-BFEF   VIA
+        // BFF0-BFF3   Microtan I/O
+
+        //bus.map(    0xBC00,    0x0400,    microtanIo,    0);
+        bus.map(microtanIo,    47,    1,    0);
+
         cpu = new Cpu6502(bus, traceConfig);
+
+        keyboard.setInterruptListener(    () -> cpu.requestIRQ());
+
 
     video = new VideoController(bus, charset);
 
@@ -172,6 +193,9 @@ private final VideoController video;
         return video;
     }
 
+    public Keyboard getKeyboard() {
+        return keyboard;
+    }
 
 }
 

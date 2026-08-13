@@ -96,3 +96,41 @@ FrameBuffer
 
 VideoPanel
 Swing
+
+
+
+# Teclado
+microtan-core/
+└── src/main/java/org/microtan/core/
+    └── io/
+        ├── Keyboard.java
+        └── KeyboardState.java
+
+microtan-ui/
+└── src/main/java/org/microtan/ui/
+    └── input/
+        └── SwingKeyboard.java
+
+# Dependencias teclado
+SwingKeyboard
+     │
+     ▼
+Keyboard
+     ▲
+     │
+Microtan65
+
+# IRQ teclado
+PC
+ │
+ │
+ ├── CPU continúa ejecutando TANBUG
+ │
+ │
+ └── IRQ
+      │
+      ▼
+    KBINT
+      │
+      ▼
+    lee BFF3

@@ -18,7 +18,7 @@ public final class Main {
 
                 Microtan65 machine = new Microtan65();
 
-                MainWindow window = new MainWindow(machine.getVideoController());
+                MainWindow window = new MainWindow(machine.getVideoController(), machine.getKeyboard());
 
                 window.setLocationRelativeTo(null);
 
