@@ -21,6 +21,14 @@ public class Bus {
                     int pageCount,
                     int deviceOffset) {
 
+
+        if (deviceOffset < 0 ||
+            deviceOffset + pageCount * 1024 > device.size()) {
+
+            throw new IllegalArgumentException(
+                    "Mapping exceeds device size");
+        }
+
         int offset = deviceOffset;
 
         for (int i = 0; i < pageCount; i++) {
@@ -41,6 +49,13 @@ public class Bus {
 
         return page.device().read(offset) & 0xFF;
     }
+
+    // Temporal para traza, no gestiona lectura sin acciones
+    public int peek(int address) {
+        return read(address);
+    }
+
+
 
     public void write(int address, int value) {
 

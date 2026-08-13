@@ -9,6 +9,8 @@ import org.microtan.core.io.VIA6522;
 import org.microtan.core.memory.RAM;
 import org.microtan.core.memory.ROM;
 import org.microtan.core.memory.RomLoader;
+import org.microtan.core.trace.TraceConfig;
+import org.microtan.core.trace.TraceOption;
 import org.microtan.core.video.CharacterROM;
 import org.microtan.core.video.VideoController;
 
@@ -28,6 +30,9 @@ public class Microtan65 {
 private final VideoController video;
 
     private volatile boolean running;
+
+    private final TraceConfig traceConfig =
+    new TraceConfig();
 
     public Microtan65() throws IOException {
 
@@ -50,16 +55,29 @@ private final VideoController video;
         // 0000-7FFF RAM (32K)
         bus.map(ram, 0, 32, 0);
 
-        // F000-FFFF TANBUG (4K)
-        bus.map(tanbug, 60, 4, 0);
+        // F800-FFFF TANBUG (2K)
+        bus.map(tanbug, 62, 2, 0);
 
         // VIA (provisional)
         // bus.map(via, ...);
 
-        cpu = new Cpu6502(bus);
+        cpu = new Cpu6502(bus, traceConfig);
 
     video = new VideoController(bus, charset);
 
+    traceConfig.setEnabled(false);
+
+    traceConfig.enable(
+        TraceOption.REGISTERS);
+
+// traceConfig.enable(TraceOption.REGISTERS);
+// traceConfig.enable(TraceOption.VIC);
+// traceConfig.enable(TraceOption.CIA);
+// traceConfig.enable(TraceOption.INTERRUPTS);
+// traceConfig.enable(TraceOption.STACK);
+// traceConfig.enable(TraceOption.MEMORY);
+// traceConfig.enable(TraceOption.BUS);
+// traceConfig.enable(TraceOption.ILLEGAL_OPCODES);        
 
     }
 
@@ -67,7 +85,32 @@ private final VideoController video;
 
         cpu.reset();
 
-        running = false;
+        //running = false;
+        cpu.reset();
+
+        via.reset();
+
+        // JAC
+        //video.reset();
+    }
+
+// Alternativa a start/stop, es MachineRunner el que controla la ejecución de pasos
+    public int step() {
+
+        int cycles = 5; // JAC temporal
+        //int cycles = cpu.step();
+
+        cpu.step();
+
+        video.tick(cycles);
+
+        // más adelante:
+        via.tick();
+        //via.tick(cycles);
+        // cassette.tick(cycles);
+
+        return cycles;
+
     }
 
     public void start() {

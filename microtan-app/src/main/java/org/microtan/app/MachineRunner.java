@@ -72,7 +72,7 @@ machine.getBus().write(0x0203,'L');
 machine.getBus().write(0x0204,'O');
 
 
-
+machine.reset();
 
 
         while (running) {
@@ -115,13 +115,14 @@ machine.getBus().write(0x0204,'O');
 
         while (executedCycles < CYCLES_PER_FRAME) {
 
-            int cycles = machine.getCpu().stepWithCycles();
-           
+            //int cycles = machine.getCpu().stepWithCycles();
+            //executedCycles += cycles;
+            executedCycles +=  machine.step();
 
-            executedCycles += cycles;
 
-            // JAC para que compile
-            machine.getVideoController().tick(cycles);
+            // JAC para que compile, creo que ya no hace falta
+            // machine.getVideoController().tick(cycles);
+            
             //listener.tick(cycles);
 
 

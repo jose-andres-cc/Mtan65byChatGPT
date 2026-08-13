@@ -90,6 +90,7 @@ public class VideoController {
 
         int x0 = column * CHAR_WIDTH;
         int y0 = row * CHAR_HEIGHT;
+boolean inverse = (character & 0x80) != 0;
 
         for (int scanLine = 0;
              scanLine < CHAR_HEIGHT;
@@ -99,6 +100,11 @@ public class VideoController {
                     characterRom.getScanLine(
                             character,
                             scanLine);
+
+            if (inverse) {
+                pattern ^= 0xFF;
+            }
+                            
 
             for (int bit = 0; bit < 8; bit++) {
 

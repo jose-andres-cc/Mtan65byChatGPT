@@ -20,4 +20,9 @@ public class RAM implements MemoryDevice {
         memory[address] = (byte) value;
     }
 
+    @Override
+    public int size() {
+        return memory.length;
+    }
+
 }

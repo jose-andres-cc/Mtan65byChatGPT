@@ -11,4 +11,6 @@ public interface MemoryDevice {
 
     default void tick() {
     }
+    
+    int size();
 }

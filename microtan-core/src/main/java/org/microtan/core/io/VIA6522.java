@@ -16,4 +16,9 @@ public class VIA6522 implements MemoryDevice {
 
     }
 
+    public int size() {
+        return 0;
+    }
+
+
 }

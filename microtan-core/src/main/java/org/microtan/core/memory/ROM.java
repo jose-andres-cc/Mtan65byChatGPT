@@ -24,4 +24,8 @@ public class ROM implements MemoryDevice {
         // ROM
     }
 
+    public int size() {
+        return memory.length;
+    }
+
 }

@@ -21,7 +21,8 @@ public CharacterROM(Path path) throws IOException {
     }
 }
 
-    public int getScanLine(int character, int row) {
+    public int getScanLine(int code, int row) {
+         int character = code & 0x7F;
         return rom[(character << 4) + row] & 0xFF;
     }
 

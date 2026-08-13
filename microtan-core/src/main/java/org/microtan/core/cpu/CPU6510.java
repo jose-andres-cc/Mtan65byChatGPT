@@ -2,13 +2,8 @@
 package org.microtan.core.cpu;
 
 import org.microtan.core.bus.Bus;
-
-
-// package com.example.c64.cpu;
-
-// import com.example.c64.bus.Bus;
-// import com.example.c64.io.KernalHooks;
-// import com.example.c64.memory.Memory;
+import org.microtan.core.trace.TraceConfig;
+import org.microtan.core.trace.TraceFormatter;
 
 public class CPU6510 {
     public int A, X, Y, PC, SP = 0xFF;
@@ -21,17 +16,25 @@ public class CPU6510 {
     private final Opcode[] opcodeTable = new Opcode[256];
     private long cycles = 0;
     private long totalCycles = 0;
-    private boolean pageCrossed;
+
+private final TraceConfig traceConfig;
+private final TraceFormatter traceFormatter;
 
     // JAC traza
     private long irqCount;
     private boolean dumped = false;
 
     // public CPU6510(Memory memory, KernalHooks hooks) {
-    public CPU6510(Bus bus) {
+    public CPU6510(Bus bus, //KernalHooks hooks, 
+               TraceConfig trace) {
         // this.memory = memory;
         this.bus = bus;
         //this.hooks = hooks;
+        this.traceConfig = trace;
+
+        this.traceFormatter =
+        new TraceFormatter(traceConfig);
+
 
         buildOpcodeTable();
     }
@@ -87,52 +90,55 @@ public class CPU6510 {
         N = (v & 0x80) != 0;
     }
 
-    private int imm() {
+    /****************************
+     * Modos de direccionamiento *
+     ****************************/
+
+    private int imm_obsolete() {
         return read(PC++);
     }
 
     private int immediate() {
-        return imm();
+        return read(PC++);
     }
 
-    // Modos de direccionamiento
-    private int zp() {
+    private int zp_obsolete() {
         return read(PC++);
     }
 
     private int zeroPage() {
-        return zp();
+        return read(PC++);
     }
 
-    private int zpx() {
+    private int zpx_obsolete() {
         return (read(PC++) + X) & 0xFF;
     }
 
     private int zeroPageX() {
-        return zpx();
+        return (read(PC++) + X) & 0xFF;
     }
 
-    private int zpy() {
+    private int zpy_obsolete() {
         return (read(PC++) + Y) & 0xFF;
     }
 
     private int zeroPageY() {
-        return zpy();
+        return (read(PC++) + Y) & 0xFF;
     }
 
-    private int abs() {
+    private int abs_obsolete() {
         int a = readWord(PC);
         PC += 2;
         return a;
     }
 
     private int absolute() {
-        return abs();
+        int a = readWord(PC);
+        PC += 2;
+        return a;
     }
 
-    // JAC revisar sus llamadas, porque en algunos casos no se añade el ciclo extra
-    // cuando hay cruce de página
-    private int absX(boolean addPageCrossCycle) {
+    private int absX_obsolete(boolean addPageCrossCycle) {
 
         int base = readWord(PC);
 
@@ -144,7 +150,7 @@ public class CPU6510 {
                 ((base & 0xFF00) != (result & 0xFF00))) {
 
             // cycles++;
-            pageCrossed = true;
+            boolean pageCrossed_obsolete = true;
         }
 
         // pageCrossed =
@@ -154,12 +160,23 @@ public class CPU6510 {
         return result;
     }
 
-    // JAC las llamadas a este metodo SON CORRECTAS
     private int absoluteX(boolean addPageCrossCycle) {
-        return absX(addPageCrossCycle);
+        int base = readWord(PC);
+
+        PC += 2;
+
+        int result = (base + X) & 0xFFFF;
+
+        if (addPageCrossCycle &&
+                ((base & 0xFF00) != (result & 0xFF00))) {
+
+            cycles++;
+        }
+
+        return result;
     }
 
-    private int absY(boolean addPageCrossCycle) {
+    private int absY_obsolete(boolean addPageCrossCycle) {
         // int a=readWord(PC); PC+=2; return (a+Y)&0xFFFF;
 
         int low = read(PC++);
@@ -178,66 +195,14 @@ public class CPU6510 {
 
     }
 
-    // JAC las llamadas a este metodo SON CORRECTAS
     private int absoluteY(boolean addPageCrossCycle) {
 
-        return absY(addPageCrossCycle);
-    }
-
-    private int indX() {
-        int zp = (read(PC++) + X) & 0xFF;
-        int lo = read(zp);
-        int hi = read((zp + 1) & 0xFF);
-        return (hi << 8) | lo;
-    }
-
-    private int indirectX() {
-        return indX();
-    }
-
-    // JAC las llamadas a este metodo necesitan revision
-    private int indY() {
-        int zp = read(PC++);
-        int lo = read(zp);
-        int hi = read((zp + 1) & 0xFF);
-        return (((hi << 8) | lo) + Y) & 0xFFFF;
-    }
-
-    /**
-     * Modo de direccionamiento (Indirect),Y
-     *
-     * Lee un puntero de 16 bits desde la página cero y después suma Y.
-     *
-     * Ejemplo:
-     * Operando = $20
-     * [$20] = $F0
-     * [$21] = $12
-     * Y = $30
-     *
-     * Dirección base = $12F0
-     * Dirección final = $1320
-     *
-     * @param addPageCrossCycle true si la instrucción debe añadir un ciclo
-     *                          cuando se cruza una página (LDA, ADC, CMP...).
-     *                          false para instrucciones RMW ilegales (RRA, ISC...).
-     *
-     * @return Dirección efectiva de 16 bits.
-     */
-    private int indirectY(boolean addPageCrossCycle) {
-
-        // Byte del operando (dirección en ZP)
-        int zp = read(PC++) & 0xFF;
-
-        // Leer puntero de 16 bits desde la página cero
-        int low = read(zp);
-        int high = read((zp + 1) & 0xFF); // wrap-around en ZP
+        int low = read(PC++);
+        int high = read(PC++);
 
         int base = (high << 8) | low;
-
-        // Aplicar índice Y
         int address = (base + Y) & 0xFFFF;
 
-        // Penalización por cruce de página
         if (addPageCrossCycle &&
                 ((base & 0xFF00) != (address & 0xFF00))) {
 
@@ -262,6 +227,48 @@ public class CPU6510 {
         int hi = read(hiAddress);
 
         return (hi << 8) | lo;
+    }
+
+    private int indX_obsolete() {
+        int zp = (read(PC++) + X) & 0xFF;
+        int lo = read(zp);
+        int hi = read((zp + 1) & 0xFF);
+        return (hi << 8) | lo;
+    }
+
+    private int indirectX() {
+        int zp = (read(PC++) + X) & 0xFF;
+        int lo = read(zp);
+        int hi = read((zp + 1) & 0xFF);
+        return (hi << 8) | lo;
+    }
+
+    // JAC las llamadas a este metodo necesitan revision
+    private int indY_obsolete() {
+        int zp = read(PC++);
+        int lo = read(zp);
+        int hi = read((zp + 1) & 0xFF);
+        return (((hi << 8) | lo) + Y) & 0xFFFF;
+    }
+
+    private int indirectY(boolean addPageCrossCycle) {
+
+        int zp = read(PC++) & 0xFF;
+
+        int low = read(zp);
+        int high = read((zp + 1) & 0xFF);
+
+        int base = (high << 8) | low;
+
+        int address = (base + Y) & 0xFFFF;
+
+        if (addPageCrossCycle &&
+                ((base & 0xFF00) != (address & 0xFF00))) {
+
+            cycles++;
+        }
+
+        return address;
     }
 
     private int relative() {
@@ -327,7 +334,7 @@ public class CPU6510 {
         }
     }
 
-    private int getStatusRegister() {
+    public int getStatusRegister() {
 
         int p = 0;
 
@@ -673,16 +680,16 @@ public class CPU6510 {
         setZN(X);
     }
 
-    public void step_execute_based() {
-        //if (hooks.handle(this))
-//            return;
+    // public void step_execute_based() {
+    // if (hooks.handle(this))
+    // return;
 
-        int opcode = read(PC++);
-        execute(opcode);
-    }
+    // int opcode = read(PC++);
+    // execute(opcode);
+    // }
 
     public void step() {
-
+      
         if (nmiPending) {
 
             handleNMI();
@@ -697,243 +704,256 @@ public class CPU6510 {
             return;
         }
 
+        int instructionPC = PC;
+
         int opcode = read(PC++);
 
         Opcode op = opcodeTable[opcode];
 
+
         op.getInstruction().execute();
+
+    if (traceConfig.isEnabled()) {
+
+        System.out.println(
+            traceFormatter.formatInstruction(
+                this,
+                op,
+                instructionPC));
+    }
 
         tick(op.getCycles());
     }
 
-    public void execute(int op) {
-        // mvn compile
-        // int op=read(PC++);
-
-        switch (op) {
-            case 0xA9 -> {
-                A = imm();
-                setZN(A);
-            }
-            case 0xA5 -> {
-                A = fetch(zp());
-                setZN(A);
-            }
-            case 0xAD -> {
-                A = fetch(abs());
-                setZN(A);
-            }
-
-            case 0xA2 -> {
-                X = imm();
-                setZN(X);
-            }
-            case 0xA6 -> {
-                X = fetch(zp());
-                setZN(X);
-            }
-            case 0xB6 -> {
-                X = fetch(zpy());
-                setZN(X);
-            }
-            case 0xAE -> {
-                X = fetch(abs());
-                setZN(X);
-            }
-            case 0xBE -> {
-                X = fetch(absY(false));
-                setZN(X);
-            }
-
-            case 0xA0 -> {
-                Y = imm();
-                setZN(Y);
-            }
-            case 0xA4 -> {
-                Y = fetch(zp());
-                setZN(Y);
-            }
-            case 0xB4 -> {
-                Y = fetch(zpx());
-                setZN(Y);
-            }
-            case 0xAC -> {
-                Y = fetch(abs());
-                setZN(Y);
-            }
-            case 0xBC -> {
-                Y = fetch(absX(false));
-                setZN(Y);
-            }
-
-            case 0x8D -> write(abs(), A);
-
-            case 0xAA -> {
-                X = A;
-                setZN(X);
-            }
-            case 0xE8 -> {
-                X = (X + 1) & 0xFF;
-                setZN(X);
-            }
-
-            case 0x20 -> {
-                int addr = abs();
-                push((PC - 1) >> 8);
-                push((PC - 1) & 0xFF);
-                PC = addr;
-            }
-
-            case 0x60 -> PC = popWord() + 1;
-
-            case 0xC9 -> compare(A, imm());
-            case 0xC5 -> compare(A, fetch(zp()));
-            case 0xD5 -> compare(A, fetch(zpx()));
-            case 0xCD -> compare(A, fetch(abs()));
-            case 0xDD -> compare(A, fetch(absX(true)));
-            case 0xD9 -> compare(A, fetch(absY(false)));
-            case 0xC1 -> compare(A, fetch(indX()));
-            case 0xD1 -> compare(A, fetch(indY()));
-
-            case 0xE0 -> compare(X, imm());
-            case 0xE4 -> compare(X, fetch(zp()));
-            case 0xEC -> compare(X, fetch(abs()));
-
-            case 0xC0 -> compare(Y, imm());
-            case 0xC4 -> compare(Y, fetch(zp()));
-            case 0xCC -> compare(Y, fetch(abs()));
-
-            case 0x10 -> branch(!N);
-            case 0x30 -> branch(N);
-            case 0x50 -> branch(!V);
-            case 0x70 -> branch(V);
-            case 0x90 -> branch(!C);
-            case 0xB0 -> branch(C);
-            case 0xD0 -> branch(!Z);
-            case 0xF0 -> branch(Z);
-
-            case 0x4C -> PC = abs();
-
-            case 0x29 -> and(imm());
-            case 0x25 -> and(fetch(zp()));
-            case 0x35 -> and(fetch(zpx()));
-            case 0x2D -> and(fetch(abs()));
-            case 0x3D -> and(fetch(absX(false)));
-            case 0x39 -> and(fetch(absY(false)));
-            case 0x21 -> and(fetch(indX()));
-            case 0x31 -> and(fetch(indY()));
-
-            case 0x49 -> eor(imm());
-            case 0x45 -> eor(fetch(zp()));
-            case 0x55 -> eor(fetch(zpx()));
-            case 0x4D -> eor(fetch(abs()));
-            case 0x5D -> eor(fetch(absX(false)));
-            case 0x59 -> eor(fetch(absY(false)));
-            case 0x41 -> eor(fetch(indX()));
-            case 0x51 -> eor(fetch(indY()));
-
-            case 0x24 -> bit(fetch(zp()));
-            case 0x2C -> bit(fetch(abs()));
-
-            case 0xC8 -> {
-                Y = (Y + 1) & 0xFF;
-                setZN(Y);
-            }
-
-            case 0x88 -> {
-                Y = (Y - 1) & 0xFF;
-                setZN(Y);
-            }
-
-            case 0xCA -> {
-                X = (X - 1) & 0xFF;
-                setZN(X);
-            }
-
-            case 0xE6 -> inc(zp());
-            case 0xF6 -> inc(zpx());
-            case 0xEE -> inc(abs());
-            case 0xFE -> inc(absX(false));
-
-            case 0xC6 -> dec(zp());
-            case 0xD6 -> dec(zpx());
-            case 0xCE -> dec(abs());
-            case 0xDE -> dec(absX(false));
-
-            case 0x48 -> push(A);
-
-            case 0x68 -> {
-                A = pop();
-                setZN(A);
-            }
-
-            case 0x08 -> push(getStatusRegister() | 0x30);
-
-            case 0x28 -> setStatusRegister(pop());
-
-            case 0x69 -> adc(imm());
-            case 0x65 -> adc(fetch(zp()));
-            case 0x75 -> adc(fetch(zpx()));
-            case 0x6D -> adc(fetch(abs()));
-            case 0x7D -> adc(fetch(absX(true)));
-            case 0x79 -> adc(fetch(absY(false)));
-            case 0x61 -> adc(fetch(indX()));
-            case 0x71 -> adc(fetch(indY()));
-            case 0xE9 -> sbc(imm());
-            case 0xE5 -> sbc(fetch(zp()));
-            case 0xF5 -> sbc(fetch(zpx()));
-            case 0xED -> sbc(fetch(abs()));
-            case 0xFD -> sbc(fetch(absX(true)));
-            case 0xF9 -> sbc(fetch(absY(false)));
-            case 0xE1 -> sbc(fetch(indX()));
-            case 0xF1 -> sbc(fetch(indY()));
-
-            case 0x18 -> C = false;
-            case 0x38 -> C = true;
-            case 0x58 -> I = false;
-            case 0x78 -> I = true;
-            case 0xB8 -> V = false;
-            case 0xD8 -> D = false;
-            case 0xF8 -> D = true;
-
-            case 0x0A -> A = aslValue(A);
-
-            case 0x06 -> aslMemory(zp());
-            case 0x16 -> aslMemory(zpx());
-            case 0x0E -> aslMemory(abs());
-            case 0x1E -> aslMemory(absX(false));
-            case 0x4A -> A = lsrValue(A);
-
-            case 0x46 -> lsrMemory(zp());
-            case 0x56 -> lsrMemory(zpx());
-            case 0x4E -> lsrMemory(abs());
-            case 0x5E -> lsrMemory(absX(false));
-            case 0x2A -> A = rolValue(A);
-
-            case 0x26 -> rolMemory(zp());
-            case 0x36 -> rolMemory(zpx());
-            case 0x2E -> rolMemory(abs());
-            case 0x3E -> rolMemory(absX(false));
-            case 0x6A -> A = rorValue(A);
-
-            case 0x66 -> rorMemory(zp());
-            case 0x76 -> rorMemory(zpx());
-            case 0x6E -> rorMemory(abs());
-            case 0x7E -> rorMemory(absX(false));
-
-            case 0xEA -> {
-            }
-
-            default -> throw new RuntimeException(String.format("Opcode %02X no implementado", op));
-        }
-    }
+    // public void execute(int op) {
+    // // mvn compile
+    // // int op=read(PC++);
+    //
+    // switch (op) {
+    // case 0xA9 -> {
+    // A = immediate();
+    // setZN(A);
+    // }
+    // case 0xA5 -> {
+    // A = fetch(zeroPage());
+    // setZN(A);
+    // }
+    // case 0xAD -> {
+    // A = fetch(absolute());
+    // setZN(A);
+    // }
+    //
+    // case 0xA2 -> {
+    // X = immediate();
+    // setZN(X);
+    // }
+    // case 0xA6 -> {
+    // X = fetch(zeroPage());
+    // setZN(X);
+    // }
+    // case 0xB6 -> {
+    // X = fetch(zeroPageY());
+    // setZN(X);
+    // }
+    // case 0xAE -> {
+    // X = fetch(absolute());
+    // setZN(X);
+    // }
+    // case 0xBE -> {
+    // X = fetch(absoluteY(false));
+    // setZN(X);
+    // }
+    //
+    // case 0xA0 -> {
+    // Y = immediate();
+    // setZN(Y);
+    // }
+    // case 0xA4 -> {
+    // Y = fetch(zeroPage());
+    // setZN(Y);
+    // }
+    // case 0xB4 -> {
+    // Y = fetch(zeroPageX());
+    // setZN(Y);
+    // }
+    // case 0xAC -> {
+    // Y = fetch(absolute());
+    // setZN(Y);
+    // }
+    // case 0xBC -> {
+    // Y = fetch(absoluteX(false));
+    // setZN(Y);
+    // }
+    //
+    // case 0x8D -> write(absolute(), A);
+    //
+    // case 0xAA -> {
+    // X = A;
+    // setZN(X);
+    // }
+    // case 0xE8 -> {
+    // X = (X + 1) & 0xFF;
+    // setZN(X);
+    // }
+    //
+    // case 0x20 -> {
+    // int addr = absolute();
+    // push((PC - 1) >> 8);
+    // push((PC - 1) & 0xFF);
+    // PC = addr;
+    // }
+    //
+    // case 0x60 -> PC = popWord() + 1;
+    //
+    // case 0xC9 -> compare(A, immediate());
+    // case 0xC5 -> compare(A, fetch(zeroPage()));
+    // case 0xD5 -> compare(A, fetch(zeroPageX()));
+    // case 0xCD -> compare(A, fetch(absolute()));
+    // case 0xDD -> compare(A, fetch(absoluteX(true)));
+    // case 0xD9 -> compare(A, fetch(absoluteY(false)));
+    // case 0xC1 -> compare(A, fetch(indirectX()));
+    // case 0xD1 -> compare(A, fetch(indY()));
+    //
+    // case 0xE0 -> compare(X, immediate());
+    // case 0xE4 -> compare(X, fetch(zeroPage()));
+    // case 0xEC -> compare(X, fetch(absolute()));
+    //
+    // case 0xC0 -> compare(Y, immediate());
+    // case 0xC4 -> compare(Y, fetch(zeroPage()));
+    // case 0xCC -> compare(Y, fetch(absolute()));
+    //
+    // case 0x10 -> branch(!N);
+    // case 0x30 -> branch(N);
+    // case 0x50 -> branch(!V);
+    // case 0x70 -> branch(V);
+    // case 0x90 -> branch(!C);
+    // case 0xB0 -> branch(C);
+    // case 0xD0 -> branch(!Z);
+    // case 0xF0 -> branch(Z);
+    //
+    // case 0x4C -> PC = absolute();
+    //
+    // case 0x29 -> and(immediate());
+    // case 0x25 -> and(fetch(zeroPage()));
+    // case 0x35 -> and(fetch(zeroPageX()));
+    // case 0x2D -> and(fetch(absolute()));
+    // case 0x3D -> and(fetch(absoluteX(false)));
+    // case 0x39 -> and(fetch(absoluteY(false)));
+    // case 0x21 -> and(fetch(indirectX()));
+    // case 0x31 -> and(fetch(indY()));
+    //
+    // case 0x49 -> eor(immediate());
+    // case 0x45 -> eor(fetch(zeroPage()));
+    // case 0x55 -> eor(fetch(zeroPageX()));
+    // case 0x4D -> eor(fetch(absolute()));
+    // case 0x5D -> eor(fetch(absoluteX(false)));
+    // case 0x59 -> eor(fetch(absoluteY(false)));
+    // case 0x41 -> eor(fetch(indirectX()));
+    // case 0x51 -> eor(fetch(indY()));
+    //
+    // case 0x24 -> bit(fetch(zeroPage()));
+    // case 0x2C -> bit(fetch(absolute()));
+    //
+    // case 0xC8 -> {
+    // Y = (Y + 1) & 0xFF;
+    // setZN(Y);
+    // }
+    //
+    // case 0x88 -> {
+    // Y = (Y - 1) & 0xFF;
+    // setZN(Y);
+    // }
+    //
+    // case 0xCA -> {
+    // X = (X - 1) & 0xFF;
+    // setZN(X);
+    // }
+    //
+    // case 0xE6 -> inc(zeroPage());
+    // case 0xF6 -> inc(zeroPageX());
+    // case 0xEE -> inc(absolute());
+    // case 0xFE -> inc(absoluteX(false));
+    //
+    // case 0xC6 -> dec(zeroPage());
+    // case 0xD6 -> dec(zeroPageX());
+    // case 0xCE -> dec(absolute());
+    // case 0xDE -> dec(absoluteX(false));
+    //
+    // case 0x48 -> push(A);
+    //
+    // case 0x68 -> {
+    // A = pop();
+    // setZN(A);
+    // }
+    //
+    // case 0x08 -> push(getStatusRegister() | 0x30);
+    //
+    // case 0x28 -> setStatusRegister(pop());
+    //
+    // case 0x69 -> adc(immediate());
+    // case 0x65 -> adc(fetch(zeroPage()));
+    // case 0x75 -> adc(fetch(zeroPageX()));
+    // case 0x6D -> adc(fetch(absolute()));
+    // case 0x7D -> adc(fetch(absoluteX(true)));
+    // case 0x79 -> adc(fetch(absoluteY(false)));
+    // case 0x61 -> adc(fetch(indirectX()));
+    // case 0x71 -> adc(fetch(indY()));
+    // case 0xE9 -> sbc(immediate());
+    // case 0xE5 -> sbc(fetch(zeroPage()));
+    // case 0xF5 -> sbc(fetch(zeroPageX()));
+    // case 0xED -> sbc(fetch(absolute()));
+    // case 0xFD -> sbc(fetch(absoluteX(true)));
+    // case 0xF9 -> sbc(fetch(absoluteY(false)));
+    // case 0xE1 -> sbc(fetch(indirectX()));
+    // case 0xF1 -> sbc(fetch(indY()));
+    //
+    // case 0x18 -> C = false;
+    // case 0x38 -> C = true;
+    // case 0x58 -> I = false;
+    // case 0x78 -> I = true;
+    // case 0xB8 -> V = false;
+    // case 0xD8 -> D = false;
+    // case 0xF8 -> D = true;
+    //
+    // case 0x0A -> A = aslValue(A);
+    //
+    // case 0x06 -> aslMemory(zeroPage());
+    // case 0x16 -> aslMemory(zeroPageX());
+    // case 0x0E -> aslMemory(absolute());
+    // case 0x1E -> aslMemory(absoluteX(false));
+    // case 0x4A -> A = lsrValue(A);
+    //
+    // case 0x46 -> lsrMemory(zeroPage());
+    // case 0x56 -> lsrMemory(zeroPageX());
+    // case 0x4E -> lsrMemory(absolute());
+    // case 0x5E -> lsrMemory(absoluteX(false));
+    // case 0x2A -> A = rolValue(A);
+    //
+    // case 0x26 -> rolMemory(zeroPage());
+    // case 0x36 -> rolMemory(zeroPageX());
+    // case 0x2E -> rolMemory(absolute());
+    // case 0x3E -> rolMemory(absoluteX(false));
+    // case 0x6A -> A = rorValue(A);
+    //
+    // case 0x66 -> rorMemory(zeroPage());
+    // case 0x76 -> rorMemory(zeroPageX());
+    // case 0x6E -> rorMemory(absolute());
+    // case 0x7E -> rorMemory(absoluteX(false));
+    //
+    // case 0xEA -> {
+    // }
+    //
+    // default -> throw new RuntimeException(String.format("Opcode %02X no
+    // implementado", op));
+    // }
+    // }
 
     private void buildOpcodeTable() {
 
         for (int i = 0; i < 256; i++) {
 
             opcodeTable[i] = new Opcode(
-                    "???",
+                    "???", AddressingMode.IMPLIED,
                     2,
                     () -> {
                         throw new RuntimeException(
@@ -985,136 +1005,135 @@ public class CPU6510 {
 
     private void registerLDA() {
 
-        opcodeTable[0xA9] = new Opcode("LDA", 2,
-                () -> lda(imm()));
+        opcodeTable[0xA9] = new Opcode("LDA", AddressingMode.IMMEDIATE,
+                2,
+                () -> lda(immediate()));
 
-        opcodeTable[0xA5] = new Opcode("LDA", 3,
-                () -> lda(fetch(zp())));
+        opcodeTable[0xA5] = new Opcode("LDA", AddressingMode.ZERO_PAGE,
+                3,
+                () -> lda(fetch(zeroPage())));
 
-        opcodeTable[0xB5] = new Opcode("LDA", 4,
-                () -> lda(fetch(zpx())));
+        opcodeTable[0xB5] = new Opcode("LDA", AddressingMode.ZERO_PAGE_X,
+                4,
+                () -> lda(fetch(zeroPageX())));
 
-        opcodeTable[0xAD] = new Opcode("LDA", 4,
-                () -> lda(fetch(abs())));
+        opcodeTable[0xAD] = new Opcode("LDA", AddressingMode.ABSOLUTE,
+                4,
+                () -> lda(fetch(absolute())));
 
-        opcodeTable[0xBD] = new Opcode("LDA", 4,
-                () -> {
+        opcodeTable[0xBD] = new Opcode("LDA", AddressingMode.ABSOLUTE_X,
+                4,
+                () -> lda(fetch(absoluteX(true))));
 
-                    lda(fetch(absX(true)));
+        opcodeTable[0xB9] = new Opcode("LDA", AddressingMode.ABSOLUTE_Y,
+                4,
+                () -> lda(fetch(absoluteY(true))));
 
-                    if (pageCrossed)
-                        tick(1);
-                });
+        opcodeTable[0xA1] = new Opcode("LDA", AddressingMode.INDIRECT_X,
+                6,
+                () -> lda(fetch(indirectX())));
 
-        opcodeTable[0xB9] = new Opcode("LDA", 4,
-                () -> {
+        opcodeTable[0xB1] = new Opcode("LDA", AddressingMode.INDIRECT_Y,
+                5,
+                () -> lda(fetch(indirectY(true))));
 
-                    lda(fetch(absY(true)));
-
-                    if (pageCrossed)
-                        tick(1);
-                });
-
-        opcodeTable[0xA1] = new Opcode("LDA", 6,
-                () -> lda(fetch(indX())));
-
-        opcodeTable[0xB1] = new Opcode("LDA", 5,
-                () -> {
-
-                    lda(fetch(indY()));
-
-                    if (pageCrossed)
-                        tick(1);
-                });
     }
 
     private void registerLDX() {
 
-        opcodeTable[0xA2] = new Opcode("LDX", 2,
-                () -> ldx(imm()));
+        opcodeTable[0xA2] = new Opcode("LDX", AddressingMode.IMMEDIATE,
+                2,
+                () -> ldx(immediate()));
 
-        opcodeTable[0xA6] = new Opcode("LDX", 3,
-                () -> ldx(fetch(zp())));
+        opcodeTable[0xA6] = new Opcode("LDX", AddressingMode.ZERO_PAGE,
+                3,
+                () -> ldx(fetch(zeroPage())));
 
-        opcodeTable[0xB6] = new Opcode("LDX", 4,
-                () -> ldx(fetch(zpy())));
+        opcodeTable[0xB6] = new Opcode("LDX", AddressingMode.ZERO_PAGE_Y,
+                4,
+                () -> ldx(fetch(zeroPageY())));
 
-        opcodeTable[0xAE] = new Opcode("LDX", 4,
-                () -> ldx(fetch(abs())));
+        opcodeTable[0xAE] = new Opcode("LDX", AddressingMode.ABSOLUTE,
+                4,
+                () -> ldx(fetch(absolute())));
 
-        opcodeTable[0xBE] = new Opcode("LDX", 4,
-                () -> {
+        opcodeTable[0xBE] = new Opcode("LDX", AddressingMode.ABSOLUTE_Y,
+                4,
+                () -> ldx(fetch(absoluteY(true))));
 
-                    ldx(fetch(absY(true)));
-
-                    if (pageCrossed)
-                        tick(1);
-                });
     }
 
     private void registerLDY() {
 
-        opcodeTable[0xA0] = new Opcode("LDY", 2,
-                () -> ldy(imm()));
+        opcodeTable[0xA0] = new Opcode("LDY", AddressingMode.IMMEDIATE,
+                2,
+                () -> ldy(immediate()));
 
-        opcodeTable[0xA4] = new Opcode("LDY", 3,
-                () -> ldy(fetch(zp())));
+        opcodeTable[0xA4] = new Opcode("LDY", AddressingMode.ZERO_PAGE,
+                3,
+                () -> ldy(fetch(zeroPage())));
 
-        opcodeTable[0xB4] = new Opcode("LDY", 4,
-                () -> ldy(fetch(zpx())));
+        opcodeTable[0xB4] = new Opcode("LDY", AddressingMode.ZERO_PAGE_X,
+                4,
+                () -> ldy(fetch(zeroPageX())));
 
-        opcodeTable[0xAC] = new Opcode("LDY", 4,
-                () -> ldy(fetch(abs())));
+        opcodeTable[0xAC] = new Opcode("LDY", AddressingMode.ABSOLUTE,
+                4,
+                () -> ldy(fetch(absolute())));
 
-        opcodeTable[0xBC] = new Opcode("LDY", 4,
-                () -> {
+        opcodeTable[0xBC] = new Opcode("LDY", AddressingMode.ABSOLUTE_X,
+                4,
+                () -> ldy(fetch(absoluteX(true))));
 
-                    ldy(fetch(absX(true)));
-
-                    if (pageCrossed)
-                        tick(1);
-                });
     }
 
     private void registerBranchInstructions() {
 
         opcodeTable[0xD0] = new Opcode(
                 "BNE",
+                AddressingMode.RELATIVE,
                 2,
                 () -> branch(!Z));
 
         opcodeTable[0xF0] = new Opcode(
                 "BEQ",
+                AddressingMode.RELATIVE,
                 2,
                 () -> branch(Z));
 
         opcodeTable[0x10] = new Opcode(
                 "BPL",
+                AddressingMode.RELATIVE,
                 2,
                 () -> branch(!N));
 
         opcodeTable[0x30] = new Opcode(
                 "BMI",
+                AddressingMode.RELATIVE,
                 2,
                 () -> branch(N));
 
         opcodeTable[0x90] = new Opcode(
                 "BCC",
+                AddressingMode.RELATIVE,
                 2,
                 () -> branch(!C));
 
         opcodeTable[0xB0] = new Opcode(
                 "BCS",
+                AddressingMode.RELATIVE,
                 2,
                 () -> branch(C));
 
         opcodeTable[0x50] = new Opcode(
                 "BVC",
+                AddressingMode.RELATIVE,
                 2,
                 () -> branch(!V));
 
         opcodeTable[0x70] = new Opcode(
                 "BVS",
+                AddressingMode.RELATIVE,
                 2,
                 () -> branch(V));
     }
@@ -1123,24 +1142,28 @@ public class CPU6510 {
 
         opcodeTable[0x69] = new Opcode(
                 "ADC",
+                AddressingMode.IMMEDIATE,
                 2,
-                () -> adc(imm()));
+                () -> adc(immediate()));
 
         opcodeTable[0x65] = new Opcode(
                 "ADC",
+                AddressingMode.ZERO_PAGE,
                 3,
-                () -> adc(fetch(zp())));
+                () -> adc(fetch(zeroPage())));
 
         opcodeTable[0x6D] = new Opcode(
                 "ADC",
+                AddressingMode.ABSOLUTE,
                 4,
-                () -> adc(fetch(abs())));
+                () -> adc(fetch(absolute())));
 
         // 79 - ADC Absolute,Y
         opcodeTable[0x79] = new Opcode(
                 "ADC",
+                AddressingMode.ABSOLUTE_Y,
                 4,
-                () -> adc(read(absY(true))));
+                () -> adc(read(absoluteY(true))));
 
         // ======================================================
         // ADC
@@ -1149,85 +1172,88 @@ public class CPU6510 {
         // 75 - ADC Zero Page,X
         opcodeTable[0x75] = new Opcode(
                 "ADC",
+                AddressingMode.ZERO_PAGE_X,
                 4,
-                () -> adc(read(zpx())));
+                () -> adc(read(zeroPageX())));
 
         // 7D - ADC Absolute,X
         opcodeTable[0x7D] = new Opcode(
                 "ADC",
+                AddressingMode.ABSOLUTE_X,
                 4,
-                () -> adc(read(absX(true))));
+                () -> adc(read(absoluteX(true))));
 
         // 61 - ADC (Indirect,X)
         opcodeTable[0x61] = new Opcode(
                 "ADC",
+                AddressingMode.INDIRECT_X,
                 6,
-                () -> adc(read(indX())));
+                () -> adc(read(indirectX())));
 
         // 71 - ADC (Indirect),Y
         opcodeTable[0x71] = new Opcode(
                 "ADC",
+                AddressingMode.INDIRECT_Y,
                 5,
-                () -> adc(read(indY())));
+                () -> adc(read(indirectY(true))));
 
     }
 
     private void registerSBCInstructions() {
 
         // SBC #imm
-        opcodeTable[0xE9] = new Opcode("SBC", 2,
-                () -> sbc(imm()));
+        opcodeTable[0xE9] = new Opcode("SBC", AddressingMode.IMMEDIATE,
+                2,
+                () -> sbc(immediate()));
 
         // SBC zp
-        opcodeTable[0xE5] = new Opcode("SBC", 3,
-                () -> sbc(fetch(zp())));
+        opcodeTable[0xE5] = new Opcode("SBC", AddressingMode.ZERO_PAGE,
+                3,
+                () -> sbc(fetch(zeroPage())));
 
         // SBC zp,X
-        opcodeTable[0xF5] = new Opcode("SBC", 4,
-                () -> sbc(fetch(zpx())));
+        opcodeTable[0xF5] = new Opcode("SBC", AddressingMode.ZERO_PAGE_X,
+                4,
+                () -> sbc(fetch(zeroPageX())));
 
         // SBC abs
-        opcodeTable[0xED] = new Opcode("SBC", 4,
-                () -> sbc(fetch(abs())));
+        opcodeTable[0xED] = new Opcode("SBC", AddressingMode.ABSOLUTE,
+                4,
+                () -> sbc(fetch(absolute())));
 
         // SBC abs,X
-        opcodeTable[0xFD] = new Opcode("SBC", 4,
-                () -> {
-                    sbc(fetch(absX(true)));
-                    if (pageCrossed)
-                        tick(1);
-                });
+        opcodeTable[0xFD] = new Opcode("SBC", AddressingMode.ABSOLUTE_X,
+                4,
+                () -> sbc(fetch(absoluteX(true))));
 
         // SBC abs,Y
-        opcodeTable[0xF9] = new Opcode("SBC", 4,
-                () -> {
-                    sbc(fetch(absY(true)));
-                    if (pageCrossed)
-                        tick(1);
-                });
+        opcodeTable[0xF9] = new Opcode("SBC", AddressingMode.ABSOLUTE_Y,
+                4,
+                () -> sbc(fetch(absoluteY(true))));
 
         // SBC (ind,X)
-        opcodeTable[0xE1] = new Opcode("SBC", 6,
-                () -> sbc(fetch(indX())));
+        opcodeTable[0xE1] = new Opcode("SBC", AddressingMode.INDIRECT_X,
+                6,
+                () -> sbc(fetch(indirectX())));
 
         // SBC (ind),Y
-        opcodeTable[0xF1] = new Opcode("SBC", 5,
-                () -> {
-                    sbc(fetch(indY()));
-                    if (pageCrossed)
-                        tick(1);
-                });
+        opcodeTable[0xF1] = new Opcode("SBC", AddressingMode.INDIRECT_Y,
+                5,
+                () -> sbc(fetch(indirectY(true))));
+
     }
 
     private void registerStackInstructions() {
 
         opcodeTable[0x48] = new Opcode(
                 "PHA",
+                AddressingMode.IMPLIED,
                 3,
                 () -> push(A));
 
         opcodeTable[0x68] = new Opcode(
                 "PLA",
+                AddressingMode.IMPLIED,
                 4,
                 () -> {
 
@@ -1238,12 +1264,14 @@ public class CPU6510 {
 
         opcodeTable[0x08] = new Opcode(
                 "PHP",
+                AddressingMode.IMPLIED,
                 3,
                 () -> push(
                         getStatusRegister() | 0x30));
 
         opcodeTable[0x28] = new Opcode(
                 "PLP",
+                AddressingMode.IMPLIED,
                 4,
                 () -> setStatusRegister(pop()));
     }
@@ -1252,14 +1280,16 @@ public class CPU6510 {
 
         opcodeTable[0x0A] = new Opcode(
                 "ASL",
+                AddressingMode.IMPLIED,
                 2,
                 () -> A = aslValue(A));
 
         opcodeTable[0x46] = new Opcode(
                 "LSR zp",
+                AddressingMode.ZERO_PAGE,
                 5,
                 () -> {
-                    int addr = zp();
+                    int addr = zeroPage();
                     int value = read(addr);
 
                     value = lsrValue(value);
@@ -1269,16 +1299,19 @@ public class CPU6510 {
 
         opcodeTable[0x4A] = new Opcode(
                 "LSR",
+                AddressingMode.IMPLIED,
                 2,
                 () -> A = lsrValue(A));
 
         opcodeTable[0x2A] = new Opcode(
                 "ROL",
+                AddressingMode.IMPLIED,
                 2,
                 () -> A = rolValue(A));
 
         opcodeTable[0x6A] = new Opcode(
                 "ROR",
+                AddressingMode.IMPLIED,
                 2,
                 () -> A = rorValue(A));
 
@@ -1287,26 +1320,26 @@ public class CPU6510 {
         // ======================================================
 
         // 06 - ASL Zero Page
-        opcodeTable[0x06] = new Opcode("ASL", 5, () -> {
-            int addr = zp();
+        opcodeTable[0x06] = new Opcode("ASL", AddressingMode.ZERO_PAGE, 5, () -> {
+            int addr = zeroPage();
             write(addr, aslValue(read(addr)));
         });
 
         // 16 - ASL Zero Page,X
-        opcodeTable[0x16] = new Opcode("ASL", 6, () -> {
-            int addr = zpx();
+        opcodeTable[0x16] = new Opcode("ASL", AddressingMode.ZERO_PAGE_X, 6, () -> {
+            int addr = zeroPageX();
             write(addr, aslValue(read(addr)));
         });
 
         // 0E - ASL Absolute
-        opcodeTable[0x0E] = new Opcode("ASL", 6, () -> {
-            int addr = abs();
+        opcodeTable[0x0E] = new Opcode("ASL", AddressingMode.ABSOLUTE, 6, () -> {
+            int addr = absolute();
             write(addr, aslValue(read(addr)));
         });
 
         // 1E - ASL Absolute,X
-        opcodeTable[0x1E] = new Opcode("ASL", 7, () -> {
-            int addr = absX(false);
+        opcodeTable[0x1E] = new Opcode("ASL", AddressingMode.ABSOLUTE_X, 7, () -> {
+            int addr = absoluteX(false);
             write(addr, aslValue(read(addr)));
         });
 
@@ -1315,26 +1348,26 @@ public class CPU6510 {
         // ======================================================
 
         // 46 - LSR Zero Page
-        opcodeTable[0x46] = new Opcode("LSR", 5, () -> {
-            int addr = zp();
+        opcodeTable[0x46] = new Opcode("LSR", AddressingMode.ZERO_PAGE, 5, () -> {
+            int addr = zeroPage();
             write(addr, lsrValue(read(addr)));
         });
 
         // 56 - LSR Zero Page,X
-        opcodeTable[0x56] = new Opcode("LSR", 6, () -> {
-            int addr = zpx();
+        opcodeTable[0x56] = new Opcode("LSR", AddressingMode.ZERO_PAGE_X, 6, () -> {
+            int addr = zeroPageX();
             write(addr, lsrValue(read(addr)));
         });
 
         // 4E - LSR Absolute
-        opcodeTable[0x4E] = new Opcode("LSR", 6, () -> {
-            int addr = abs();
+        opcodeTable[0x4E] = new Opcode("LSR", AddressingMode.ABSOLUTE, 6, () -> {
+            int addr = absolute();
             write(addr, lsrValue(read(addr)));
         });
 
         // 5E - LSR Absolute,X
-        opcodeTable[0x5E] = new Opcode("LSR", 7, () -> {
-            int addr = absX(false);
+        opcodeTable[0x5E] = new Opcode("LSR", AddressingMode.ABSOLUTE_X, 7, () -> {
+            int addr = absoluteX(false);
             write(addr, lsrValue(read(addr)));
         });
 
@@ -1343,26 +1376,26 @@ public class CPU6510 {
         // ======================================================
 
         // 26 - ROL Zero Page
-        opcodeTable[0x26] = new Opcode("ROL", 5, () -> {
-            int addr = zp();
+        opcodeTable[0x26] = new Opcode("ROL", AddressingMode.ZERO_PAGE, 5, () -> {
+            int addr = zeroPage();
             write(addr, rolValue(read(addr)));
         });
 
         // 36 - ROL Zero Page,X
-        opcodeTable[0x36] = new Opcode("ROL", 6, () -> {
-            int addr = zpx();
+        opcodeTable[0x36] = new Opcode("ROL", AddressingMode.ZERO_PAGE_X, 6, () -> {
+            int addr = zeroPageX();
             write(addr, rolValue(read(addr)));
         });
 
         // 2E - ROL Absolute
-        opcodeTable[0x2E] = new Opcode("ROL", 6, () -> {
-            int addr = abs();
+        opcodeTable[0x2E] = new Opcode("ROL", AddressingMode.ABSOLUTE, 6, () -> {
+            int addr = absolute();
             write(addr, rolValue(read(addr)));
         });
 
         // 3E - ROL Absolute,X
-        opcodeTable[0x3E] = new Opcode("ROL", 7, () -> {
-            int addr = absX(false);
+        opcodeTable[0x3E] = new Opcode("ROL", AddressingMode.ABSOLUTE_X, 7, () -> {
+            int addr = absoluteX(false);
             write(addr, rolValue(read(addr)));
         });
 
@@ -1371,26 +1404,26 @@ public class CPU6510 {
         // ======================================================
 
         // 66 - ROR Zero Page
-        opcodeTable[0x66] = new Opcode("ROR", 5, () -> {
-            int addr = zp();
+        opcodeTable[0x66] = new Opcode("ROR", AddressingMode.ZERO_PAGE, 5, () -> {
+            int addr = zeroPage();
             write(addr, rorValue(read(addr)));
         });
 
         // 76 - ROR Zero Page,X
-        opcodeTable[0x76] = new Opcode("ROR", 6, () -> {
-            int addr = zpx();
+        opcodeTable[0x76] = new Opcode("ROR", AddressingMode.ZERO_PAGE_X, 6, () -> {
+            int addr = zeroPageX();
             write(addr, rorValue(read(addr)));
         });
 
         // 6E - ROR Absolute
-        opcodeTable[0x6E] = new Opcode("ROR", 6, () -> {
-            int addr = abs();
+        opcodeTable[0x6E] = new Opcode("ROR", AddressingMode.ABSOLUTE, 6, () -> {
+            int addr = absolute();
             write(addr, rorValue(read(addr)));
         });
 
         // 7E - ROR Absolute,X
-        opcodeTable[0x7E] = new Opcode("ROR", 7, () -> {
-            int addr = absX(false);
+        opcodeTable[0x7E] = new Opcode("ROR", AddressingMode.ABSOLUTE_X, 7, () -> {
+            int addr = absoluteX(false);
             write(addr, rorValue(read(addr)));
         });
 
@@ -1398,7 +1431,7 @@ public class CPU6510 {
 
     private void registerJumpInstructions() {
 
-        opcodeTable[0x00] = new Opcode("BRK", 7,
+        opcodeTable[0x00] = new Opcode("BRK", AddressingMode.IMPLIED, 7,
                 () -> {
 
                     PC++;
@@ -1416,10 +1449,11 @@ public class CPU6510 {
 
         opcodeTable[0x20] = new Opcode(
                 "JSR",
+                AddressingMode.ABSOLUTE,
                 6,
                 () -> {
 
-                    int addr = abs();
+                    int addr = absolute();
 
                     pushWord(PC - 1);
 
@@ -1427,12 +1461,12 @@ public class CPU6510 {
                 });
 
         opcodeTable[0x60] = new Opcode(
-                "RTS",
+                "RTS", AddressingMode.IMPLIED,
                 6,
                 () -> PC = popWord() + 1);
 
         opcodeTable[0x40] = new Opcode(
-                "RTI",
+                "RTI", AddressingMode.IMPLIED,
                 6,
                 () -> {
 
@@ -1444,13 +1478,15 @@ public class CPU6510 {
                     PC = (hi << 8) | lo;
                 });
 
-        opcodeTable[0x6C] = new Opcode("JMP", 5,
+        opcodeTable[0x6C] = new Opcode("JMP", AddressingMode.INDIRECT,
+                5,
                 () -> PC = indirect());
 
         opcodeTable[0x4C] = new Opcode(
                 "JMP",
+                AddressingMode.ABSOLUTE,
                 3,
-                () -> PC = abs());
+                () -> PC = absolute());
 
     }
 
@@ -1460,75 +1496,69 @@ public class CPU6510 {
         // CMP
         // ==========================
 
-        opcodeTable[0xC9] = new Opcode("CMP", 2,
-                () -> compare(A, imm()));
+        opcodeTable[0xC9] = new Opcode("CMP", AddressingMode.IMMEDIATE,
+                2,
+                () -> compare(A, immediate()));
 
-        opcodeTable[0xC5] = new Opcode("CMP", 3,
-                () -> compare(A, fetch(zp())));
+        opcodeTable[0xC5] = new Opcode("CMP", AddressingMode.ZERO_PAGE,
+                3,
+                () -> compare(A, fetch(zeroPage())));
 
-        opcodeTable[0xD5] = new Opcode("CMP", 4,
-                () -> compare(A, fetch(zpx())));
+        opcodeTable[0xD5] = new Opcode("CMP", AddressingMode.ZERO_PAGE_X,
+                4,
+                () -> compare(A, fetch(zeroPageX())));
 
-        opcodeTable[0xCD] = new Opcode("CMP", 4,
-                () -> compare(A, fetch(abs())));
+        opcodeTable[0xCD] = new Opcode("CMP", AddressingMode.ABSOLUTE,
+                4,
+                () -> compare(A, fetch(absolute())));
 
-        opcodeTable[0xDD] = new Opcode("CMP", 4,
-                () -> {
+        opcodeTable[0xDD] = new Opcode("CMP", AddressingMode.ABSOLUTE_X,
+                4,
+                () -> compare(A, fetch(absoluteX(true))));
 
-                    compare(A, fetch(absX(true)));
+        opcodeTable[0xD9] = new Opcode("CMP", AddressingMode.ABSOLUTE_Y,
+                4,
+                () -> compare(A, fetch(absoluteY(true))));
 
-                    if (pageCrossed) {
-                        tick(1);
-                    }
-                });
+        opcodeTable[0xC1] = new Opcode("CMP", AddressingMode.INDIRECT_X,
+                6,
+                () -> compare(A, fetch(indirectX())));
 
-        opcodeTable[0xD9] = new Opcode("CMP", 4,
-                () -> {
-
-                    compare(A, fetch(absY(true)));
-
-                    if (pageCrossed) {
-                        tick(1);
-                    }
-                });
-        opcodeTable[0xC1] = new Opcode("CMP", 6,
-                () -> compare(A, fetch(indX())));
-
-        opcodeTable[0xD1] = new Opcode("CMP", 5,
-                () -> {
-
-                    compare(A, fetch(indY()));
-
-                    if (pageCrossed) {
-                        tick(1);
-                    }
-                });
+        opcodeTable[0xD1] = new Opcode("CMP", AddressingMode.INDIRECT_Y,
+                5,
+                () -> compare(A, fetch(indirectY(true))));
 
         // ==========================
         // CPX
         // ==========================
 
-        opcodeTable[0xE0] = new Opcode("CPX", 2,
-                () -> compare(X, imm()));
+        opcodeTable[0xE0] = new Opcode("CPX", AddressingMode.IMMEDIATE,
+                2,
+                () -> compare(X, immediate()));
 
-        opcodeTable[0xE4] = new Opcode("CPX", 3,
-                () -> compare(X, fetch(zp())));
+        opcodeTable[0xE4] = new Opcode("CPX", AddressingMode.ZERO_PAGE,
+                3,
+                () -> compare(X, fetch(zeroPage())));
 
-        opcodeTable[0xEC] = new Opcode("CPX", 4,
-                () -> compare(X, fetch(abs())));
+        opcodeTable[0xEC] = new Opcode("CPX", AddressingMode.ABSOLUTE,
+                4,
+                () -> compare(X, fetch(absolute())));
 
         // ==========================
         // CPY
         // ==========================
 
-        opcodeTable[0xC0] = new Opcode("CPY", 2,
-                () -> compare(Y, imm()));
+        opcodeTable[0xC0] = new Opcode("CPY", AddressingMode.IMMEDIATE,
+                2,
+                () -> compare(Y, immediate()));
 
-        opcodeTable[0xC4] = new Opcode("CPY", 3,
-                () -> compare(Y, fetch(zp())));
+        opcodeTable[0xC4] = new Opcode("CPY", AddressingMode.ZERO_PAGE,
+                3,
+                () -> compare(Y, fetch(zeroPage())));
 
-        opcodeTable[0xCC] = new Opcode("CPY", 4,
-                () -> compare(Y, fetch(abs())));
+        opcodeTable[0xCC] = new Opcode("CPY", AddressingMode.ABSOLUTE,
+                4,
+                () -> compare(Y, fetch(absolute())));
     }
 
     private void registerLogicalInstructions() {
@@ -1537,149 +1567,121 @@ public class CPU6510 {
         // AND
         // =====================================
 
-        opcodeTable[0x29] = new Opcode("AND", 2,
-                () -> and(imm()));
+        opcodeTable[0x29] = new Opcode("AND", AddressingMode.IMMEDIATE,
+                2,
+                () -> and(immediate()));
 
-        opcodeTable[0x25] = new Opcode("AND", 3,
-                () -> and(fetch(zp())));
+        opcodeTable[0x25] = new Opcode("AND", AddressingMode.ZERO_PAGE,
+                3,
+                () -> and(fetch(zeroPage())));
 
-        opcodeTable[0x35] = new Opcode("AND", 4,
-                () -> and(fetch(zpx())));
+        opcodeTable[0x35] = new Opcode("AND", AddressingMode.ZERO_PAGE_X,
+                4,
+                () -> and(fetch(zeroPageX())));
 
-        opcodeTable[0x2D] = new Opcode("AND", 4,
-                () -> and(fetch(abs())));
+        opcodeTable[0x2D] = new Opcode("AND", AddressingMode.ABSOLUTE,
+                4,
+                () -> and(fetch(absolute())));
 
-        opcodeTable[0x3D] = new Opcode("AND", 4,
-                () -> {
-                    and(fetch(absX(true)));
+        opcodeTable[0x3D] = new Opcode("AND", AddressingMode.ABSOLUTE_X,
+                4,
+                () -> and(fetch(absoluteX(true))));
 
-                    if (pageCrossed) {
-                        tick(1);
-                    }
-                });
+        opcodeTable[0x39] = new Opcode("AND", AddressingMode.ABSOLUTE_Y,
+                4,
+                () -> and(fetch(absoluteY(true))));
 
-        opcodeTable[0x39] = new Opcode("AND", 4,
-                () -> {
-                    and(fetch(absY(true)));
+        opcodeTable[0x21] = new Opcode("AND", AddressingMode.INDIRECT_X,
+                6,
+                () -> and(fetch(indirectX())));
 
-                    if (pageCrossed) {
-                        tick(1);
-                    }
-                });
-
-        opcodeTable[0x21] = new Opcode("AND", 6,
-                () -> and(fetch(indX())));
-
-        opcodeTable[0x31] = new Opcode("AND", 5,
-                () -> {
-                    and(fetch(indY()));
-
-                    if (pageCrossed) {
-                        tick(1);
-                    }
-                });
+        opcodeTable[0x31] = new Opcode("AND", AddressingMode.INDIRECT_Y,
+                5,
+                () -> and(fetch(indirectY(true))));
 
         // =====================================
         // ORA
         // =====================================
 
-        opcodeTable[0x09] = new Opcode("ORA", 2,
-                () -> ora(imm()));
+        opcodeTable[0x09] = new Opcode("ORA", AddressingMode.IMMEDIATE,
+                2,
+                () -> ora(immediate()));
 
-        opcodeTable[0x05] = new Opcode("ORA", 3,
-                () -> ora(fetch(zp())));
+        opcodeTable[0x05] = new Opcode("ORA", AddressingMode.ZERO_PAGE,
+                3,
+                () -> ora(fetch(zeroPage())));
 
-        opcodeTable[0x15] = new Opcode("ORA", 4,
-                () -> ora(fetch(zpx())));
+        opcodeTable[0x15] = new Opcode("ORA", AddressingMode.ZERO_PAGE_X,
+                4,
+                () -> ora(fetch(zeroPageX())));
 
-        opcodeTable[0x0D] = new Opcode("ORA", 4,
-                () -> ora(fetch(abs())));
+        opcodeTable[0x0D] = new Opcode("ORA", AddressingMode.ABSOLUTE,
+                4,
+                () -> ora(fetch(absolute())));
 
-        opcodeTable[0x1D] = new Opcode("ORA", 4,
-                () -> {
-                    ora(fetch(absX(true)));
+        opcodeTable[0x1D] = new Opcode("ORA", AddressingMode.ABSOLUTE_X,
+                4,
+                () -> ora(fetch(absoluteX(true))));
 
-                    if (pageCrossed) {
-                        tick(1);
-                    }
-                });
+        opcodeTable[0x19] = new Opcode("ORA", AddressingMode.ABSOLUTE_Y,
+                4,
+                () -> ora(fetch(absoluteY(true))));
 
-        opcodeTable[0x19] = new Opcode("ORA", 4,
-                () -> {
-                    ora(fetch(absY(true)));
+        opcodeTable[0x01] = new Opcode("ORA", AddressingMode.INDIRECT_X,
+                6,
+                () -> ora(fetch(indirectX())));
 
-                    if (pageCrossed) {
-                        tick(1);
-                    }
-                });
-
-        opcodeTable[0x01] = new Opcode("ORA", 6,
-                () -> ora(fetch(indX())));
-
-        opcodeTable[0x11] = new Opcode("ORA", 5,
-                () -> {
-                    ora(fetch(indY()));
-
-                    if (pageCrossed) {
-                        tick(1);
-                    }
-                });
+        opcodeTable[0x11] = new Opcode("ORA", AddressingMode.INDIRECT_Y,
+                5,
+                () -> ora(fetch(indirectY(true))));
 
         // =====================================
         // EOR
         // =====================================
 
-        opcodeTable[0x49] = new Opcode("EOR", 2,
-                () -> eor(imm()));
+        opcodeTable[0x49] = new Opcode("EOR", AddressingMode.IMMEDIATE,
+                2,
+                () -> eor(immediate()));
 
-        opcodeTable[0x45] = new Opcode("EOR", 3,
-                () -> eor(fetch(zp())));
+        opcodeTable[0x45] = new Opcode("EOR", AddressingMode.ZERO_PAGE,
+                3,
+                () -> eor(fetch(zeroPage())));
 
-        opcodeTable[0x55] = new Opcode("EOR", 4,
-                () -> eor(fetch(zpx())));
+        opcodeTable[0x55] = new Opcode("EOR", AddressingMode.ZERO_PAGE_X,
+                4,
+                () -> eor(fetch(zeroPageX())));
 
-        opcodeTable[0x4D] = new Opcode("EOR", 4,
-                () -> eor(fetch(abs())));
+        opcodeTable[0x4D] = new Opcode("EOR", AddressingMode.ABSOLUTE,
+                4,
+                () -> eor(fetch(absolute())));
 
-        opcodeTable[0x5D] = new Opcode("EOR", 4,
-                () -> {
-                    eor(fetch(absX(true)));
+        opcodeTable[0x5D] = new Opcode("EOR", AddressingMode.ABSOLUTE_X,
+                4,
+                () -> eor(fetch(absoluteX(true))));
 
-                    if (pageCrossed) {
-                        tick(1);
-                    }
-                });
+        opcodeTable[0x59] = new Opcode("EOR", AddressingMode.ABSOLUTE_Y,
+                4,
+                () -> eor(fetch(absoluteY(true))));
 
-        opcodeTable[0x59] = new Opcode("EOR", 4,
-                () -> {
-                    eor(fetch(absY(true)));
+        opcodeTable[0x41] = new Opcode("EOR", AddressingMode.INDIRECT_X,
+                6,
+                () -> eor(fetch(indirectX())));
 
-                    if (pageCrossed) {
-                        tick(1);
-                    }
-                });
-
-        opcodeTable[0x41] = new Opcode("EOR", 6,
-                () -> eor(fetch(indX())));
-
-        opcodeTable[0x51] = new Opcode("EOR", 5,
-                () -> {
-                    eor(fetch(indY()));
-
-                    if (pageCrossed) {
-                        tick(1);
-                    }
-                });
+        opcodeTable[0x51] = new Opcode("EOR", AddressingMode.INDIRECT_Y,
+                5,
+                () -> eor(fetch(indirectY(true))));
 
         // =====================================
         // BIT
         // =====================================
 
-        opcodeTable[0x24] = new Opcode("BIT", 3,
-                () -> bit(fetch(zp())));
+        opcodeTable[0x24] = new Opcode("BIT", AddressingMode.ZERO_PAGE,
+                3,
+                () -> bit(fetch(zeroPage())));
 
-        opcodeTable[0x2C] = new Opcode("BIT", 4,
-                () -> bit(fetch(abs())));
+        opcodeTable[0x2C] = new Opcode("BIT", AddressingMode.ABSOLUTE,
+                4,
+                () -> bit(fetch(absolute())));
     }
 
     private void registerTransferInstructions() {
@@ -1688,7 +1690,7 @@ public class CPU6510 {
         // TAX
         // ==========================
 
-        opcodeTable[0xAA] = new Opcode("TAX", 2,
+        opcodeTable[0xAA] = new Opcode("TAX", AddressingMode.IMPLIED, 2,
                 () -> {
 
                     X = A & 0xFF;
@@ -1700,7 +1702,7 @@ public class CPU6510 {
         // TXA
         // ==========================
 
-        opcodeTable[0x8A] = new Opcode("TXA", 2,
+        opcodeTable[0x8A] = new Opcode("TXA", AddressingMode.IMPLIED, 2,
                 () -> {
 
                     A = X & 0xFF;
@@ -1712,7 +1714,7 @@ public class CPU6510 {
         // TAY
         // ==========================
 
-        opcodeTable[0xA8] = new Opcode("TAY", 2,
+        opcodeTable[0xA8] = new Opcode("TAY", AddressingMode.IMPLIED, 2,
                 () -> {
 
                     Y = A & 0xFF;
@@ -1724,7 +1726,7 @@ public class CPU6510 {
         // TYA
         // ==========================
 
-        opcodeTable[0x98] = new Opcode("TYA", 2,
+        opcodeTable[0x98] = new Opcode("TYA", AddressingMode.IMPLIED, 2,
                 () -> {
 
                     A = Y & 0xFF;
@@ -1736,7 +1738,7 @@ public class CPU6510 {
         // TSX
         // ==========================
 
-        opcodeTable[0xBA] = new Opcode("TSX", 2,
+        opcodeTable[0xBA] = new Opcode("TSX", AddressingMode.IMPLIED, 2,
                 () -> {
 
                     X = SP & 0xFF;
@@ -1748,7 +1750,7 @@ public class CPU6510 {
         // TXS
         // ==========================
 
-        opcodeTable[0x9A] = new Opcode("TXS", 2,
+        opcodeTable[0x9A] = new Opcode("TXS", AddressingMode.IMPLIED, 2,
                 () -> {
 
                     SP = X & 0xFF;
@@ -1763,21 +1765,21 @@ public class CPU6510 {
         // CLC
         // ==========================
 
-        opcodeTable[0x18] = new Opcode("CLC", 2,
+        opcodeTable[0x18] = new Opcode("CLC", AddressingMode.IMPLIED, 2,
                 () -> C = false);
 
         // ==========================
         // SEC
         // ==========================
 
-        opcodeTable[0x38] = new Opcode("SEC", 2,
+        opcodeTable[0x38] = new Opcode("SEC", AddressingMode.IMPLIED, 2,
                 () -> C = true);
 
         // ==========================
         // CLI
         // ==========================
 
-        opcodeTable[0x58] = new Opcode("CLI", 2,
+        opcodeTable[0x58] = new Opcode("CLI", AddressingMode.IMPLIED, 2,
                 () -> {
                     System.out.printf("CLI ejecutado PC=%04X%n", PC - 1);
                     I = false;
@@ -1787,28 +1789,28 @@ public class CPU6510 {
         // SEI
         // ==========================
 
-        opcodeTable[0x78] = new Opcode("SEI", 2,
+        opcodeTable[0x78] = new Opcode("SEI", AddressingMode.IMPLIED, 2,
                 () -> I = true);
 
         // ==========================
         // CLV
         // ==========================
 
-        opcodeTable[0xB8] = new Opcode("CLV", 2,
+        opcodeTable[0xB8] = new Opcode("CLV", AddressingMode.IMPLIED, 2,
                 () -> V = false);
 
         // ==========================
         // CLD
         // ==========================
 
-        opcodeTable[0xD8] = new Opcode("CLD", 2,
+        opcodeTable[0xD8] = new Opcode("CLD", AddressingMode.IMPLIED, 2,
                 () -> D = false);
 
         // ==========================
         // SED
         // ==========================
 
-        opcodeTable[0xF8] = new Opcode("SED", 2,
+        opcodeTable[0xF8] = new Opcode("SED", AddressingMode.IMPLIED, 2,
                 () -> D = true);
     }
 
@@ -1818,27 +1820,33 @@ public class CPU6510 {
         // STX
         // ==========================
 
-        opcodeTable[0x86] = new Opcode("STX", 3,
-                () -> write(zp(), X));
+        opcodeTable[0x86] = new Opcode("STX", AddressingMode.ZERO_PAGE,
+                3,
+                () -> write(zeroPage(), X));
 
-        opcodeTable[0x96] = new Opcode("STX", 4,
-                () -> write(zpy(), X));
+        opcodeTable[0x96] = new Opcode("STX", AddressingMode.ZERO_PAGE_Y,
+                4,
+                () -> write(zeroPageY(), X));
 
-        opcodeTable[0x8E] = new Opcode("STX", 4,
-                () -> write(abs(), X));
+        opcodeTable[0x8E] = new Opcode("STX", AddressingMode.ABSOLUTE,
+                4,
+                () -> write(absolute(), X));
 
         // ==========================
         // STY
         // ==========================
 
-        opcodeTable[0x84] = new Opcode("STY", 3,
-                () -> write(zp(), Y));
+        opcodeTable[0x84] = new Opcode("STY", AddressingMode.ZERO_PAGE,
+                3,
+                () -> write(zeroPage(), Y));
 
-        opcodeTable[0x94] = new Opcode("STY", 4,
-                () -> write(zpx(), Y));
+        opcodeTable[0x94] = new Opcode("STY", AddressingMode.ZERO_PAGE_X,
+                4,
+                () -> write(zeroPageX(), Y));
 
-        opcodeTable[0x8C] = new Opcode("STY", 4,
-                () -> write(abs(), Y));
+        opcodeTable[0x8C] = new Opcode("STY", AddressingMode.ABSOLUTE,
+                4,
+                () -> write(absolute(), Y));
     }
 
     private void registerStoreInstructions() {
@@ -1849,38 +1857,45 @@ public class CPU6510 {
 
         opcodeTable[0x85] = new Opcode(
                 "STA",
+                AddressingMode.ZERO_PAGE,
                 3,
-                () -> write(zp(), A));
+                () -> write(zeroPage(), A));
 
         opcodeTable[0x95] = new Opcode(
                 "STA",
+                AddressingMode.ZERO_PAGE_X,
                 4,
-                () -> write(zpx(), A));
+                () -> write(zeroPageX(), A));
 
         opcodeTable[0x8D] = new Opcode(
                 "STA",
+                AddressingMode.ABSOLUTE,
                 4,
-                () -> write(abs(), A));
+                () -> write(absolute(), A));
 
         opcodeTable[0x9D] = new Opcode(
                 "STA",
+                AddressingMode.ABSOLUTE_X,
                 5,
-                () -> write(absX(true), A));
+                () -> write(absoluteX(false), A));
 
         opcodeTable[0x99] = new Opcode(
                 "STA",
+                AddressingMode.ABSOLUTE_Y,
                 5,
-                () -> write(absY(false), A));
+                () -> write(absoluteY(false), A));
 
         opcodeTable[0x81] = new Opcode(
                 "STA",
+                AddressingMode.INDIRECT_X,
                 6,
-                () -> write(indX(), A));
+                () -> write(indirectX(), A));
 
         opcodeTable[0x91] = new Opcode(
                 "STA",
+                AddressingMode.INDIRECT_Y,
                 6,
-                () -> write(indY(), A));
+                () -> write(indirectY(false), A));
 
         // STX/STY si ya los añadimos
         registerStoreXYInstructions();
@@ -1892,7 +1907,7 @@ public class CPU6510 {
         // INX
         // ==========================
 
-        opcodeTable[0xE8] = new Opcode("INX", 2,
+        opcodeTable[0xE8] = new Opcode("INX", AddressingMode.IMPLIED, 2,
                 () -> {
 
                     X = (X + 1) & 0xFF;
@@ -1904,7 +1919,7 @@ public class CPU6510 {
         // INY
         // ==========================
 
-        opcodeTable[0xC8] = new Opcode("INY", 2,
+        opcodeTable[0xC8] = new Opcode("INY", AddressingMode.IMPLIED, 2,
                 () -> {
 
                     Y = (Y + 1) & 0xFF;
@@ -1916,7 +1931,7 @@ public class CPU6510 {
         // DEX
         // ==========================
 
-        opcodeTable[0xCA] = new Opcode("DEX", 2,
+        opcodeTable[0xCA] = new Opcode("DEX", AddressingMode.IMPLIED, 2,
                 () -> {
 
                     X = (X - 1) & 0xFF;
@@ -1928,7 +1943,7 @@ public class CPU6510 {
         // DEY
         // ==========================
 
-        opcodeTable[0x88] = new Opcode("DEY", 2,
+        opcodeTable[0x88] = new Opcode("DEY", AddressingMode.IMPLIED, 2,
                 () -> {
 
                     Y = (Y - 1) & 0xFF;
@@ -1945,41 +1960,47 @@ public class CPU6510 {
         // INC
         // ==========================
 
-        opcodeTable[0xE6] = new Opcode("INC", 5,
-                () -> inc(zp()));
+        opcodeTable[0xE6] = new Opcode("INC", AddressingMode.ZERO_PAGE,
+                5,
+                () -> inc(zeroPage()));
 
-        opcodeTable[0xF6] = new Opcode("INC", 6,
-                () -> inc(zpx()));
+        opcodeTable[0xF6] = new Opcode("INC", AddressingMode.ZERO_PAGE_X,
+                6,
+                () -> inc(zeroPageX()));
 
-        opcodeTable[0xEE] = new Opcode("INC", 6,
-                () -> inc(abs()));
+        opcodeTable[0xEE] = new Opcode("INC", AddressingMode.ABSOLUTE,
+                6,
+                () -> inc(absolute()));
 
-        opcodeTable[0xFE] = new Opcode("INC", 7,
-                () -> inc(absX(false)));
+        opcodeTable[0xFE] = new Opcode("INC", AddressingMode.ABSOLUTE_X,
+                7,
+                () -> inc(absoluteX(false)));
 
         // ==========================
         // DEC
         // ==========================
 
-        opcodeTable[0xC6] = new Opcode("DEC", 5,
-                () -> dec(zp()));
+        opcodeTable[0xC6] = new Opcode("DEC", AddressingMode.ZERO_PAGE,
+                5,
+                () -> dec(zeroPage()));
 
-        opcodeTable[0xD6] = new Opcode("DEC", 6,
-                () -> dec(zpx()));
+        opcodeTable[0xD6] = new Opcode("DEC", AddressingMode.ZERO_PAGE_X,
+                6,
+                () -> dec(zeroPageX()));
 
-        opcodeTable[0xCE] = new Opcode("DEC", 6,
-                () -> dec(abs()));
+        opcodeTable[0xCE] = new Opcode("DEC", AddressingMode.ABSOLUTE,
+                6,
+                () -> dec(absolute()));
 
-        opcodeTable[0xDE] = new Opcode("DEC", 7,
-                () -> dec(absX(false)));
+        opcodeTable[0xDE] = new Opcode("DEC", AddressingMode.ABSOLUTE_X,
+                7,
+                () -> dec(absoluteX(false)));
     }
 
     private void registerControlInstructions() {
 
-        opcodeTable[0xEA] = new Opcode("NOP", 2,
-                () -> {
-                    // no-op
-                });
+        opcodeTable[0xEA] = new Opcode("NOP", AddressingMode.IMPLIED, 2,
+                () -> nop());
     }
 
     private void registerIllegalInstructions() {
@@ -2009,17 +2030,17 @@ public class CPU6510 {
         // NOP de 1 byte
         //
 
-        opcodeTable[0x1A] = new Opcode("NOP", 2, () -> nop());
+        opcodeTable[0x1A] = new Opcode("NOP", AddressingMode.IMPLIED, 2, () -> nop());
 
-        opcodeTable[0x3A] = new Opcode("NOP", 2, () -> nop());
+        opcodeTable[0x3A] = new Opcode("NOP", AddressingMode.IMPLIED, 2, () -> nop());
 
-        opcodeTable[0x5A] = new Opcode("NOP", 2, () -> nop());
+        opcodeTable[0x5A] = new Opcode("NOP", AddressingMode.IMPLIED, 2, () -> nop());
 
-        opcodeTable[0x7A] = new Opcode("NOP", 2, () -> nop());
+        opcodeTable[0x7A] = new Opcode("NOP", AddressingMode.IMPLIED, 2, () -> nop());
 
-        opcodeTable[0xDA] = new Opcode("NOP", 2, () -> nop());
+        opcodeTable[0xDA] = new Opcode("NOP", AddressingMode.IMPLIED, 2, () -> nop());
 
-        opcodeTable[0xFA] = new Opcode("NOP", 2, () -> nop());
+        opcodeTable[0xFA] = new Opcode("NOP", AddressingMode.IMPLIED, 2, () -> nop());
 
         //
         // Immediate
@@ -2027,26 +2048,31 @@ public class CPU6510 {
 
         opcodeTable[0x80] = new Opcode(
                 "NOP",
+                AddressingMode.IMMEDIATE,
                 2,
                 () -> immediate());
 
         opcodeTable[0x82] = new Opcode(
                 "NOP",
+                AddressingMode.IMMEDIATE,
                 2,
                 () -> immediate());
 
         opcodeTable[0x89] = new Opcode(
                 "NOP",
+                AddressingMode.IMMEDIATE,
                 2,
                 () -> immediate());
 
         opcodeTable[0xC2] = new Opcode(
                 "NOP",
+                AddressingMode.IMMEDIATE,
                 2,
                 () -> immediate());
 
         opcodeTable[0xE2] = new Opcode(
                 "NOP",
+                AddressingMode.IMMEDIATE,
                 2,
                 () -> immediate());
 
@@ -2056,16 +2082,19 @@ public class CPU6510 {
 
         opcodeTable[0x04] = new Opcode(
                 "NOP",
+                AddressingMode.ZERO_PAGE,
                 3,
                 () -> read(zeroPage()));
 
         opcodeTable[0x44] = new Opcode(
                 "NOP",
+                AddressingMode.ZERO_PAGE,
                 3,
                 () -> read(zeroPage()));
 
         opcodeTable[0x64] = new Opcode(
                 "NOP",
+                AddressingMode.ZERO_PAGE,
                 3,
                 () -> read(zeroPage()));
 
@@ -2075,31 +2104,37 @@ public class CPU6510 {
 
         opcodeTable[0x14] = new Opcode(
                 "NOP",
+                AddressingMode.ZERO_PAGE_X,
                 4,
                 () -> read(zeroPageX()));
 
         opcodeTable[0x34] = new Opcode(
                 "NOP",
+                AddressingMode.ZERO_PAGE_X,
                 4,
                 () -> read(zeroPageX()));
 
         opcodeTable[0x54] = new Opcode(
                 "NOP",
+                AddressingMode.ZERO_PAGE_X,
                 4,
                 () -> read(zeroPageX()));
 
         opcodeTable[0x74] = new Opcode(
                 "NOP",
+                AddressingMode.ZERO_PAGE_X,
                 4,
                 () -> read(zeroPageX()));
 
         opcodeTable[0xD4] = new Opcode(
                 "NOP",
+                AddressingMode.ZERO_PAGE_X,
                 4,
                 () -> read(zeroPageX()));
 
         opcodeTable[0xF4] = new Opcode(
                 "NOP",
+                AddressingMode.ZERO_PAGE_X,
                 4,
                 () -> read(zeroPageX()));
 
@@ -2109,6 +2144,7 @@ public class CPU6510 {
 
         opcodeTable[0x0C] = new Opcode(
                 "NOP",
+                AddressingMode.ABSOLUTE,
                 4,
                 () -> read(absolute()));
 
@@ -2119,31 +2155,37 @@ public class CPU6510 {
 
         opcodeTable[0x1C] = new Opcode(
                 "NOP",
+                AddressingMode.ABSOLUTE_X,
                 4,
                 () -> read(absoluteX(true)));
 
         opcodeTable[0x3C] = new Opcode(
                 "NOP",
+                AddressingMode.ABSOLUTE_X,
                 4,
                 () -> read(absoluteX(true)));
 
         opcodeTable[0x5C] = new Opcode(
                 "NOP",
+                AddressingMode.ABSOLUTE_X,
                 4,
                 () -> read(absoluteX(true)));
 
         opcodeTable[0x7C] = new Opcode(
                 "NOP",
+                AddressingMode.ABSOLUTE_X,
                 4,
                 () -> read(absoluteX(true)));
 
         opcodeTable[0xDC] = new Opcode(
                 "NOP",
+                AddressingMode.ABSOLUTE_X,
                 4,
                 () -> read(absoluteX(true)));
 
         opcodeTable[0xFC] = new Opcode(
                 "NOP",
+                AddressingMode.ABSOLUTE_X,
                 4,
                 () -> read(absoluteX(true)));
     }
@@ -2153,36 +2195,42 @@ public class CPU6510 {
         // A7 - Zero Page
         opcodeTable[0xA7] = new Opcode(
                 "LAX",
+                AddressingMode.ZERO_PAGE,
                 3,
                 () -> lax(read(zeroPage())));
 
         // B7 - Zero Page,Y
         opcodeTable[0xB7] = new Opcode(
                 "LAX",
+                AddressingMode.ZERO_PAGE_Y,
                 4,
                 () -> lax(read(zeroPageY())));
 
         // AF - Absolute
         opcodeTable[0xAF] = new Opcode(
                 "LAX",
+                AddressingMode.ABSOLUTE,
                 4,
                 () -> lax(read(absolute())));
 
         // BF - Absolute,Y
         opcodeTable[0xBF] = new Opcode(
                 "LAX",
+                AddressingMode.ABSOLUTE_Y,
                 4,
                 () -> lax(read(absoluteY(true))));
 
         // A3 - (Indirect,X)
         opcodeTable[0xA3] = new Opcode(
                 "LAX",
+                AddressingMode.INDIRECT_X,
                 6,
                 () -> lax(read(indirectX())));
 
         // B3 - (Indirect),Y
         opcodeTable[0xB3] = new Opcode(
                 "LAX",
+                AddressingMode.INDIRECT_Y,
                 5,
                 () -> lax(read(indirectY(true))));
     }
@@ -2192,169 +2240,215 @@ public class CPU6510 {
         // 87 - Zero Page
         opcodeTable[0x87] = new Opcode(
                 "SAX",
+                AddressingMode.ZERO_PAGE,
                 3,
                 () -> sax(zeroPage()));
 
         // 97 - Zero Page,Y
         opcodeTable[0x97] = new Opcode(
                 "SAX",
+                AddressingMode.ZERO_PAGE_Y,
                 4,
                 () -> sax(zeroPageY()));
 
         // 8F - Absolute
         opcodeTable[0x8F] = new Opcode(
                 "SAX",
+                AddressingMode.ABSOLUTE,
                 4,
                 () -> sax(absolute()));
 
         // 83 - (Indirect,X)
         opcodeTable[0x83] = new Opcode(
                 "SAX",
+                AddressingMode.INDIRECT_X,
                 6,
                 () -> sax(indirectX()));
     }
 
     private void registerSLOInstructions() {
 
-        opcodeTable[0x07] = new Opcode("SLO", 5,
+        opcodeTable[0x07] = new Opcode("SLO", AddressingMode.ZERO_PAGE,
+                5,
                 () -> slo(zeroPage()));
 
-        opcodeTable[0x17] = new Opcode("SLO", 6,
+        opcodeTable[0x17] = new Opcode("SLO", AddressingMode.ZERO_PAGE_X,
+                6,
                 () -> slo(zeroPageX()));
 
-        opcodeTable[0x0F] = new Opcode("SLO", 6,
+        opcodeTable[0x0F] = new Opcode("SLO", AddressingMode.ABSOLUTE,
+                6,
                 () -> slo(absolute()));
 
-        opcodeTable[0x1F] = new Opcode("SLO", 7,
+        opcodeTable[0x1F] = new Opcode("SLO", AddressingMode.ABSOLUTE_X,
+                7,
                 () -> slo(absoluteX(false)));
 
-        opcodeTable[0x1B] = new Opcode("SLO", 7,
+        opcodeTable[0x1B] = new Opcode("SLO", AddressingMode.ABSOLUTE_Y,
+                7,
                 () -> slo(absoluteY(false)));
 
-        opcodeTable[0x03] = new Opcode("SLO", 8,
+        opcodeTable[0x03] = new Opcode("SLO", AddressingMode.INDIRECT_X,
+                8,
                 () -> slo(indirectX()));
 
-        opcodeTable[0x13] = new Opcode("SLO", 8,
+        opcodeTable[0x13] = new Opcode("SLO", AddressingMode.INDIRECT_Y,
+                8,
                 () -> slo(indirectY(false)));
     }
 
     private void registerRLAInstructions() {
 
-        opcodeTable[0x27] = new Opcode("RLA", 5,
+        opcodeTable[0x27] = new Opcode("RLA", AddressingMode.ZERO_PAGE,
+                5,
                 () -> rla(zeroPage()));
 
-        opcodeTable[0x37] = new Opcode("RLA", 6,
+        opcodeTable[0x37] = new Opcode("RLA", AddressingMode.ZERO_PAGE_X,
+                6,
                 () -> rla(zeroPageX()));
 
-        opcodeTable[0x2F] = new Opcode("RLA", 6,
+        opcodeTable[0x2F] = new Opcode("RLA", AddressingMode.ABSOLUTE,
+                6,
                 () -> rla(absolute()));
 
-        opcodeTable[0x3F] = new Opcode("RLA", 7,
+        opcodeTable[0x3F] = new Opcode("RLA", AddressingMode.ABSOLUTE_X,
+                7,
                 () -> rla(absoluteX(false)));
 
-        opcodeTable[0x3B] = new Opcode("RLA", 7,
+        opcodeTable[0x3B] = new Opcode("RLA", AddressingMode.ABSOLUTE_Y,
+                7,
                 () -> rla(absoluteY(false)));
 
-        opcodeTable[0x23] = new Opcode("RLA", 8,
+        opcodeTable[0x23] = new Opcode("RLA", AddressingMode.INDIRECT_X,
+                8,
                 () -> rla(indirectX()));
 
-        opcodeTable[0x33] = new Opcode("RLA", 8,
+        opcodeTable[0x33] = new Opcode("RLA", AddressingMode.INDIRECT_Y,
+                8,
                 () -> rla(indirectY(false)));
     }
 
     private void registerSREInstructions() {
 
-        opcodeTable[0x47] = new Opcode("SRE", 5,
+        opcodeTable[0x47] = new Opcode("SRE", AddressingMode.ZERO_PAGE,
+                5,
                 () -> sre(zeroPage()));
 
-        opcodeTable[0x57] = new Opcode("SRE", 6,
+        opcodeTable[0x57] = new Opcode("SRE", AddressingMode.ZERO_PAGE_X,
+                6,
                 () -> sre(zeroPageX()));
 
-        opcodeTable[0x4F] = new Opcode("SRE", 6,
+        opcodeTable[0x4F] = new Opcode("SRE", AddressingMode.ABSOLUTE,
+                6,
                 () -> sre(absolute()));
 
-        opcodeTable[0x5F] = new Opcode("SRE", 7,
+        opcodeTable[0x5F] = new Opcode("SRE", AddressingMode.ABSOLUTE_X,
+                7,
                 () -> sre(absoluteX(false)));
 
-        opcodeTable[0x5B] = new Opcode("SRE", 7,
+        opcodeTable[0x5B] = new Opcode("SRE", AddressingMode.ABSOLUTE_Y,
+                7,
                 () -> sre(absoluteY(false)));
 
-        opcodeTable[0x43] = new Opcode("SRE", 8,
+        opcodeTable[0x43] = new Opcode("SRE", AddressingMode.INDIRECT_X,
+                8,
                 () -> sre(indirectX()));
 
-        opcodeTable[0x53] = new Opcode("SRE", 8,
+        opcodeTable[0x53] = new Opcode("SRE", AddressingMode.INDIRECT_Y,
+                8,
                 () -> sre(indirectY(false)));
     }
 
     private void registerRRAInstructions() {
 
-        opcodeTable[0x67] = new Opcode("RRA", 5,
+        opcodeTable[0x67] = new Opcode("RRA", AddressingMode.ZERO_PAGE,
+                5,
                 () -> rra(zeroPage()));
 
-        opcodeTable[0x77] = new Opcode("RRA", 6,
+        opcodeTable[0x77] = new Opcode("RRA", AddressingMode.ZERO_PAGE_X,
+                6,
                 () -> rra(zeroPageX()));
 
-        opcodeTable[0x6F] = new Opcode("RRA", 6,
+        opcodeTable[0x6F] = new Opcode("RRA", AddressingMode.ABSOLUTE,
+                6,
                 () -> rra(absolute()));
 
-        opcodeTable[0x7F] = new Opcode("RRA", 7,
+        opcodeTable[0x7F] = new Opcode("RRA", AddressingMode.ABSOLUTE_X,
+                7,
                 () -> rra(absoluteX(false)));
 
-        opcodeTable[0x7B] = new Opcode("RRA", 7,
+        opcodeTable[0x7B] = new Opcode("RRA", AddressingMode.ABSOLUTE_Y,
+                7,
                 () -> rra(absoluteY(false)));
 
-        opcodeTable[0x63] = new Opcode("RRA", 8,
+        opcodeTable[0x63] = new Opcode("RRA", AddressingMode.INDIRECT_X,
+                8,
                 () -> rra(indirectX()));
 
-        opcodeTable[0x73] = new Opcode("RRA", 8,
+        opcodeTable[0x73] = new Opcode("RRA", AddressingMode.INDIRECT_Y,
+                8,
                 () -> rra(indirectY(false)));
     }
 
     private void registerDCPInstructions() {
 
-        opcodeTable[0xC7] = new Opcode("DCP", 5,
+        opcodeTable[0xC7] = new Opcode("DCP", AddressingMode.ZERO_PAGE,
+                5,
                 () -> dcp(zeroPage()));
 
-        opcodeTable[0xD7] = new Opcode("DCP", 6,
+        opcodeTable[0xD7] = new Opcode("DCP", AddressingMode.ZERO_PAGE_X,
+                6,
                 () -> dcp(zeroPageX()));
 
-        opcodeTable[0xCF] = new Opcode("DCP", 6,
+        opcodeTable[0xCF] = new Opcode("DCP", AddressingMode.ABSOLUTE,
+                6,
                 () -> dcp(absolute()));
 
-        opcodeTable[0xDF] = new Opcode("DCP", 7,
+        opcodeTable[0xDF] = new Opcode("DCP", AddressingMode.ABSOLUTE_X,
+                7,
                 () -> dcp(absoluteX(false)));
 
-        opcodeTable[0xDB] = new Opcode("DCP", 7,
+        opcodeTable[0xDB] = new Opcode("DCP", AddressingMode.ABSOLUTE_Y,
+                7,
                 () -> dcp(absoluteY(false)));
 
-        opcodeTable[0xC3] = new Opcode("DCP", 8,
+        opcodeTable[0xC3] = new Opcode("DCP", AddressingMode.INDIRECT_X,
+                8,
                 () -> dcp(indirectX()));
 
-        opcodeTable[0xD3] = new Opcode("DCP", 8,
+        opcodeTable[0xD3] = new Opcode("DCP", AddressingMode.INDIRECT_Y,
+                8,
                 () -> dcp(indirectY(false)));
     }
 
     private void registerISCInstructions() {
 
-        opcodeTable[0xE7] = new Opcode("ISC", 5,
+        opcodeTable[0xE7] = new Opcode("ISC", AddressingMode.ZERO_PAGE,
+                5,
                 () -> isc(zeroPage()));
 
-        opcodeTable[0xF7] = new Opcode("ISC", 6,
+        opcodeTable[0xF7] = new Opcode("ISC", AddressingMode.ZERO_PAGE_X,
+                6,
                 () -> isc(zeroPageX()));
 
-        opcodeTable[0xEF] = new Opcode("ISC", 6,
+        opcodeTable[0xEF] = new Opcode("ISC", AddressingMode.ABSOLUTE,
+                6,
                 () -> isc(absolute()));
 
-        opcodeTable[0xFF] = new Opcode("ISC", 7,
+        opcodeTable[0xFF] = new Opcode("ISC", AddressingMode.ABSOLUTE_X,
+                7,
                 () -> isc(absoluteX(false)));
 
-        opcodeTable[0xFB] = new Opcode("ISC", 7,
+        opcodeTable[0xFB] = new Opcode("ISC", AddressingMode.ABSOLUTE_Y,
+                7,
                 () -> isc(absoluteY(false)));
 
-        opcodeTable[0xE3] = new Opcode("ISC", 8,
+        opcodeTable[0xE3] = new Opcode("ISC", AddressingMode.INDIRECT_X,
+                8,
                 () -> isc(indirectX()));
 
-        opcodeTable[0xF3] = new Opcode("ISC", 8,
+        opcodeTable[0xF3] = new Opcode("ISC", AddressingMode.INDIRECT_Y,
+                8,
                 () -> isc(indirectY(false)));
     }
 
@@ -2362,11 +2456,13 @@ public class CPU6510 {
 
         opcodeTable[0x0B] = new Opcode(
                 "ANC",
+                AddressingMode.IMMEDIATE,
                 2,
                 () -> anc(immediate()));
 
         opcodeTable[0x2B] = new Opcode(
                 "ANC",
+                AddressingMode.IMMEDIATE,
                 2,
                 () -> anc(immediate()));
     }
@@ -2375,6 +2471,7 @@ public class CPU6510 {
 
         opcodeTable[0x4B] = new Opcode(
                 "ALR",
+                AddressingMode.IMMEDIATE,
                 2,
                 () -> alr(immediate()));
     }
@@ -2383,6 +2480,7 @@ public class CPU6510 {
 
         opcodeTable[0x6B] = new Opcode(
                 "ARR",
+                AddressingMode.IMMEDIATE,
                 2,
                 () -> arr(immediate()));
     }
@@ -2391,6 +2489,7 @@ public class CPU6510 {
 
         opcodeTable[0xCB] = new Opcode(
                 "SBX",
+                AddressingMode.IMMEDIATE,
                 2,
                 () -> sbx(immediate()));
     }
@@ -2490,6 +2589,8 @@ public class CPU6510 {
                 handleIRQ();
             }
 
+                int instructionPC = PC;
+
             int opcode = read(PC++) & 0xFF;
 
             Opcode instruction = opcodeTable[opcode];
@@ -2502,10 +2603,22 @@ public class CPU6510 {
                                 opcode));
             }
 
+
+
             cycles = instruction.getCycles();
 
             // instruction.execute();
             instruction.getInstruction().execute();
+
+    if (traceConfig.isEnabled()) {
+
+        System.out.println(
+            traceFormatter.formatInstruction(
+                this,
+                instruction,
+                instructionPC));
+    }
+
         }
 
         cycles--;
@@ -2563,5 +2676,42 @@ public class CPU6510 {
     public long getRemainingCycles() {
         return cycles;
     }
+
+    // Getters para trazas y depuración
+public int getA() {
+    return A & 0xFF;
+}
+
+public int getX() {
+    return X & 0xFF;
+}
+
+public int getY() {
+    return Y & 0xFF;
+}
+
+public int getSP() {
+    return SP & 0xFF;
+}
+
+public int getPC() {
+    return PC & 0xFFFF;
+}
+
+public Bus getBus() {
+    return bus;
+}
+
+public boolean isIrqPending() {
+    return irqPending;
+}
+
+public boolean isNmiPending() {
+    return nmiPending;
+}
+
+public boolean isInterruptDisableFlagSet() {
+    return I;
+}
 
 }

@@ -11,4 +11,8 @@ public class EmptyDevice implements MemoryDevice {
     public void write(int address, int value) {
     }
 
+    public int size() {
+        return 0;
+    }
+
 }
