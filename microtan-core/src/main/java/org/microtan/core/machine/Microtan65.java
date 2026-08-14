@@ -6,8 +6,8 @@ import java.nio.file.Path;
 import org.microtan.core.bus.Bus;
 import org.microtan.core.cpu.Cpu6502;
 import org.microtan.core.io.MicrotanIo;
-import org.microtan.core.io.VIA6522;
 import org.microtan.core.io.keyboard.Keyboard;
+import org.microtan.core.io.via.VIA6522;
 import org.microtan.core.memory.RAM;
 import org.microtan.core.memory.ROM;
 import org.microtan.core.memory.RomLoader;
@@ -26,7 +26,7 @@ public class Microtan65 {
 
     private final ROM tanbug;
 
-    private final VIA6522 via;
+    private final VIA6522 via1;
 
     private final MicrotanIo microtanIo;
 
@@ -52,11 +52,11 @@ private final VideoController video;
         charset = new CharacterROM(
                 Path.of("roms", "CHARSET.BIN"));
 
-        via = new VIA6522();
+        via1 = new VIA6522();
 
         keyboard = new Keyboard();
 
-        microtanIo = new MicrotanIo(keyboard);
+        microtanIo = new MicrotanIo(via1, keyboard);
         //
         // Mapa de memoria
         //
@@ -80,6 +80,17 @@ private final VideoController video;
         bus.map(microtanIo,    47,    1,    0);
 
         cpu = new Cpu6502(bus, traceConfig);
+
+        /*
+         * IRQ de la VIA.
+         */
+        via1.setIrqListener(
+                active -> {
+
+                    if (active) {
+                        cpu.requestIRQ();
+                    }
+                });
 
         keyboard.setInterruptListener(    () -> cpu.requestIRQ());
 
@@ -125,8 +136,9 @@ private final VideoController video;
 
         video.tick(cycles);
 
-        // más adelante:
-        via.tick();
+    for (int i = 0; i < cycles; i++) {
+        via1.tick();
+    }
         //via.tick(cycles);
         // cassette.tick(cycles);
 

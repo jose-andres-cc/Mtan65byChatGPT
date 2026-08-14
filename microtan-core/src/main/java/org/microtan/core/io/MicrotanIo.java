@@ -2,6 +2,7 @@ package org.microtan.core.io;
 
 import org.microtan.core.io.keyboard.Keyboard;
 import org.microtan.core.bus.MemoryDevice;
+import org.microtan.core.io.via.VIA6522;
 
 /**
  * Dispositivos de E/S propios de la placa Microtan 65.
@@ -30,32 +31,109 @@ import org.microtan.core.bus.MemoryDevice;
  * 
  * 
  */
+
+/**
+ * Página de E/S del Microtan:
+ *
+ * BC00-BFFF
+ *
+ * BFC0-BFCF -> VIA 1
+ * BFD0-BFD3 -> Serial (futuro)
+ * BFE0-BFEF -> VIA 2 (futuro)
+ * BFF0-BFF3 -> Microtan I/O / teclado
+ */
+
 public class MicrotanIo implements MemoryDevice {
 
-    private static final int BFF0 = 0x3F0;
-    private static final int BFF1 = 0x3F1;
-    private static final int BFF2 = 0x3F2;
-    private static final int BFF3 = 0x3F3;
+    // private static final int BFF0 = 0x3F0;
+    // private static final int BFF1 = 0x3F1;
+    // private static final int BFF2 = 0x3F2;
+    // private static final int BFF3 = 0x3F3;
 
     private final Keyboard keyboard;
 
-    public MicrotanIo(Keyboard keyboard) {
+    private static final int VIA1_BASE = 0x3C0;
+    private static final int VIA2_BASE = 0x3E0;
+
+    private static final int KEYBOARD_BASE = 0x3F0;
+
+    private final VIA6522 via1;
+    // duplicado private final Keyboard keyboard;
+
+
+    public MicrotanIo(
+            VIA6522 via1,
+            Keyboard keyboard) {
         this.keyboard = keyboard;
+        this.via1 = via1;
     }
 
     @Override
     public int read(int address) {
 
-        switch (address & 0x03FF) {
+        address &= 0x03FF;
 
-            case BFF0:
-                // Graphics ON.
-                //
-                // Todavía no necesitamos devolver un valor
-                // específico para esta funcionalidad.
+        if (address >= VIA1_BASE &&
+            address < VIA1_BASE + 0x10) {
+
+            return via1.read(address - VIA1_BASE);
+        }
+
+        if (address >= KEYBOARD_BASE &&
+            address < KEYBOARD_BASE + 0x10) {
+
+            return readKeyboardIo(
+                    address - KEYBOARD_BASE);
+        }
+
+        /*
+         * Segunda VIA todavía no instalada.
+         */
+        if (address >= VIA2_BASE &&
+            address < VIA2_BASE + 0x10) {
+
+            return 0xFF;
+        }
+
+        return 0xFF;
+    }
+
+    @Override
+    public void write(int address, int value) {
+
+        address &= 0x03FF;
+
+        if (address >= VIA1_BASE &&
+            address < VIA1_BASE + 0x10) {
+
+            via1.write(
+                    address - VIA1_BASE,
+                    value);
+
+            return;
+        }
+
+        if (address >= KEYBOARD_BASE &&
+            address < KEYBOARD_BASE + 0x10) {
+
+            writeKeyboardIo(
+                    address - KEYBOARD_BASE,
+                    value);
+
+            return;
+        }
+    }
+
+    private int readKeyboardIo(int address) {
+
+        switch (address) {
+
+            case 0x00:
+                // BFF0: graphics ON
                 return 0x00;
 
-            case BFF3:
+            case 0x03:
+                // BFF3: keyboard data
                 return keyboard.readData();
 
             default:
@@ -63,27 +141,27 @@ public class MicrotanIo implements MemoryDevice {
         }
     }
 
-    @Override
-    public void write(int address, int value) {
+    private void writeKeyboardIo(
+            int address,
+            int value) {
 
-        switch (address & 0x03FF) {
+        switch (address) {
 
-            case BFF0:
+            case 0x00:
+                // BFF0: clear keyboard interrupt
                 keyboard.clearInterruptFlag();
                 break;
 
-            case BFF1:
-                // Delayed NMI.
-                // Se implementará posteriormente.
+            case 0x01:
+                // BFF1: delayed NMI
                 break;
 
-            case BFF2:
-                // Keyboard/keypad strobe.
-                // Para un teclado ASCII no es necesario.
+            case 0x02:
+                // BFF2: hexadecimal keypad
                 break;
 
-            case BFF3:
-                // Graphics OFF.
+            case 0x03:
+                // BFF3: graphics OFF
                 break;
 
             default:
