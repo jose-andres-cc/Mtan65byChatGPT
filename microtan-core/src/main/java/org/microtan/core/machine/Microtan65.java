@@ -120,7 +120,7 @@ private final VideoController video;
         //running = false;
         cpu.reset();
 
-        via.reset();
+        via1.reset();
 
         // JAC
         //video.reset();
@@ -171,7 +171,7 @@ private final VideoController video;
 
            // bus.tick();
 
-    via.tick();
+    via1.tick();
     //via.tick(cycles);
 
     video.tick(cycles);

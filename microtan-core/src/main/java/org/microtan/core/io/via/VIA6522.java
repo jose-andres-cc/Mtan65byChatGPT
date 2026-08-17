@@ -494,7 +494,7 @@ public class VIA6522 implements MemoryDevice {
 
     @Override
     public int size() {
-        return (0x10); // 16
+        return (1024); 
     }
 
     // ---------------------------------------------------------------------

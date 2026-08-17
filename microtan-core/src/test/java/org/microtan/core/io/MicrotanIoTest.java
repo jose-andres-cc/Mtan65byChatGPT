@@ -5,18 +5,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.microtan.core.io.keyboard.Keyboard;
-import org.microtan.core.io.via.Via6522;
+import org.microtan.core.io.via.VIA6522;
 
 class MicrotanIoTest {
 
     private MicrotanIo io;
-    private Via6522 via;
+    private VIA6522 via;
     private Keyboard keyboard;
 
     @BeforeEach
     void setUp() {
 
-        via = new Via6522();
+        via = new VIA6522();
         keyboard = new Keyboard();
 
         io = new MicrotanIo(

@@ -7,9 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.microtan.core.bus.Bus;
-import org.microtan.core.cpu.Mos6510;
-import org.microtan.core.io.via.Via6522;
-import org.microtan.core.memory.Ram;
+import org.microtan.core.cpu.Cpu6502;
+import org.microtan.core.io.via.VIA6522;
+import org.microtan.core.memory.RAM;
+import org.microtan.core.trace.TraceConfig;
 
 class CpuViaIrqTest {
 
@@ -29,13 +30,16 @@ class CpuViaIrqTest {
     private static final int IFR          = VIA_BASE + 0x0D;
     private static final int IER          = VIA_BASE + 0x0E;
 
+        private final TraceConfig traceConfig =
+    new TraceConfig();
+
     @Test
     void timer1GeneratesCpuIrq() {
 
-        Ram ram = new Ram(0x10000);
-        Via6522 via = new Via6522();
+        RAM ram = new RAM(0x10000);
+        VIA6522 via = new VIA6522();
         Bus bus = new Bus();
-        Mos6510 cpu = new Mos6510(bus);
+        Cpu6502 cpu = new Cpu6502(bus, traceConfig);
 
         /*
          * RAM ocupa todas las páginas excepto la página BC00.
@@ -133,13 +137,13 @@ class CpuViaIrqTest {
          */
         assertEquals(
                 0,
-                via.read(0x0D) & Via6522.IFR_T1);
+                via.read(0x0D) & VIA6522.IFR_T1);
     }
 
     /**
      * Programa que configura T1 en one-shot.
      */
-    private void loadOneShotProgram(Ram ram) {
+    private void loadOneShotProgram(RAM ram) {
 
         int[] program = {
 
@@ -235,7 +239,7 @@ class CpuViaIrqTest {
     }
 
     private void load(
-            Ram ram,
+            RAM ram,
             int address,
             int[] data) {
 
@@ -247,7 +251,7 @@ class CpuViaIrqTest {
     }
 
     private void writeWord(
-            Ram ram,
+            RAM ram,
             int address,
             int value) {
 
